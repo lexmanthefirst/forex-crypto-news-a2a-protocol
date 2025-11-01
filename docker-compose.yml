@@ -1,0 +1,8 @@
+cservices:
+  app:
+    build: .
+    container_name: crypto_forex_a2a
+    env_file: .env
+    ports:
+      - "8000:8000"
+    restart: always

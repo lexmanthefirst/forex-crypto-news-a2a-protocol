@@ -1,0 +1,24 @@
+[project]
+name = "crypto-news-a2a"
+version = "0.1.0"
+description = "A cryto/forex news tracker agent with A2A protocol support"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi[all]>=0.115.12",
+    "pydantic-ai>=0.4.2",
+    "httpx>=0.28.1",
+    "python-dotenv>=1.1.0",
+    "redis[hiredis]>=6.0.0",
+    "jsonrpcclient>=4.0.3",
+    "minio>=7.2.15",
+    "uvicorn[standard]>=0.21",
+    "gunicorn>=20.1",
+    "python-json-logger>=2.0",
+    "apscheduler>=3.10",
+    "google-genai>=1.0.0",
+    "requests>=2.31.0"
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
