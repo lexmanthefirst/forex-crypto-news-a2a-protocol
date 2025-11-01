@@ -23,6 +23,7 @@ from models.a2a import (
     MessagePart,
     TaskResult,
 )
+from utils.errors import A2AErrorCode, create_error_response
 from utils.redis_client import redis_store
 
 app = FastAPI(title="Market Intelligence A2A", version="1.0.0", docs_url="/docs")
@@ -89,35 +90,25 @@ async def a2a_endpoint(request: Request):
         body = await request.json()
     except Exception as exc:
         print(f"DEBUG: JSON parse failed: {exc}")
-        return JSONResponse(
-            status_code=400,
-            content={
-                "jsonrpc": "2.0",
-                "id": None,
-                "error": {
-                    "code": -32700,
-                    "message": "Parse error",
-                    "data": {
-                        "details": str(exc),
-                        "content_type": content_type,
-                        "body_preview": raw_body.decode("utf-8", errors="ignore")[:200]
-                    }
-                }
-            },
+        error_response = create_error_response(
+            request_id=None,
+            code=A2AErrorCode.PARSE_ERROR,
+            message="Parse error",
+            data={"details": str(exc)}
         )
+        return JSONResponse(status_code=400, content=error_response)
 
     try:
         rpc = JSONRPCRequest(**body)
     except Exception as exc:
         request_id = body.get("id") if isinstance(body, dict) else None
-        return JSONResponse(
-            status_code=400,
-            content={
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "error": {"code": -32600, "message": "Invalid Request", "data": str(exc)},
-            },
+        error_response = create_error_response(
+            request_id=request_id,
+            code=A2AErrorCode.INVALID_REQUEST,
+            message="Invalid Request",
+            data={"details": str(exc)}
         )
+        return JSONResponse(status_code=400, content=error_response)
 
     try:
         params = rpc.params
@@ -138,14 +129,13 @@ async def a2a_endpoint(request: Request):
         return JSONResponse(content=resp.model_dump())
     except Exception as exc:
         tb = traceback.format_exc()
-        return JSONResponse(
-            status_code=500,
-            content={
-                "jsonrpc": "2.0",
-                "id": rpc.id,
-                "error": {"code": -32603, "message": "Internal error", "data": {"details": str(exc), "trace": tb}},
-            },
+        error_response = create_error_response(
+            request_id=rpc.id,
+            code=A2AErrorCode.INTERNAL_ERROR,
+            message="Internal error",
+            data={"details": str(exc), "trace": tb}
         )
+        return JSONResponse(status_code=500, content=error_response)
 
 @app.get("/health")
 async def health_check():
