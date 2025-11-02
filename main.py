@@ -1,3 +1,20 @@
+"""
+A2A Market Intelligence Agent - Main Application
+
+This FastAPI application provides a JSON-RPC 2.0 endpoint for market analysis
+of cryptocurrencies and forex pairs using the Agent-to-Agent (A2A) protocol.
+
+Architecture:
+- Request parsing & validation layer
+- Blocking and non-blocking request handling (webhook support for Telex.im)
+- Background scheduled analysis jobs
+- Market intelligence agent integration
+- Redis session storage
+
+Endpoints:
+- POST /a2a/market: Main A2A protocol endpoint
+- GET /health: Health check with dependency status
+"""
 from __future__ import annotations
 
 import asyncio
@@ -19,11 +36,13 @@ from models.a2a import (
     ExecuteParams,
     JSONRPCRequest,
     JSONRPCResponse,
+    MessageConfiguration,
     MessageParams,
     MessagePart,
     TaskResult,
 )
 from utils.errors import A2AErrorCode, create_error_response
+from utils.notifier import send_webhook_notification
 from utils.redis_client import redis_store
 
 app = FastAPI(title="Market Intelligence A2A", version="1.0.0", docs_url="/docs")
@@ -77,9 +96,13 @@ async def _scheduled_analysis_job() -> None:
         except Exception:  # pragma: no cover - logging fallback
             traceback.print_exc()
 
-@app.post("/a2a/market")
-async def a2a_endpoint(request: Request):
-    # Log request details for debugging
+
+# ===========================
+# Request Parsing & Validation
+# ===========================
+
+async def _parse_request_body(request: Request) -> dict[str, Any] | JSONResponse:
+    """Parse and log incoming request body."""
     content_type = request.headers.get("content-type", "")
     print(f"DEBUG: Content-Type={content_type}")
     
@@ -88,7 +111,8 @@ async def a2a_endpoint(request: Request):
     
     try:
         body = await request.json()
-        print(f"DEBUG: Parsed JSON successfully: {body}")
+        print(f"DEBUG: Parsed JSON successfully")
+        return body
     except Exception as exc:
         print(f"DEBUG: JSON parse failed: {exc}")
         error_response = create_error_response(
@@ -99,9 +123,13 @@ async def a2a_endpoint(request: Request):
         )
         return JSONResponse(status_code=400, content=error_response)
 
+
+async def _validate_jsonrpc_request(body: dict[str, Any]) -> JSONRPCRequest | JSONResponse:
+    """Validate JSON-RPC request structure."""
     try:
         rpc = JSONRPCRequest(**body)
         print(f"DEBUG: Valid JSON-RPC request, method={rpc.method}")
+        return rpc
     except Exception as exc:
         print(f"DEBUG: Pydantic validation failed: {exc}")
         request_id = body.get("id") if isinstance(body, dict) else None
@@ -113,32 +141,105 @@ async def a2a_endpoint(request: Request):
         )
         return JSONResponse(status_code=400, content=error_response)
 
+
+def _create_internal_error_response(request_id: str, exc: Exception) -> JSONResponse:
+    """Create internal error response with traceback."""
+    tb = traceback.format_exc()
+    error_response = create_error_response(
+        request_id=request_id,
+        code=A2AErrorCode.INTERNAL_ERROR,
+        message="Internal error",
+        data={"details": str(exc), "trace": tb}
+    )
+    return JSONResponse(status_code=500, content=error_response)
+
+
+# ===========================
+# Request Handlers
+# ===========================
+
+async def _handle_message_send(request_id: str, params: MessageParams) -> JSONResponse:
+    """Handle message/send JSON-RPC method."""
+    messages = [params.message]
+    config = params.configuration
+    
+    # Check if non-blocking mode (Telex.im pattern)
+    if not config.blocking and config.pushNotification:
+        return await _handle_nonblocking_request(request_id, messages, config)
+    else:
+        return await _handle_blocking_request(request_id, messages, config)
+
+
+async def _handle_execute(request_id: str, params: ExecuteParams) -> JSONResponse:
+    """Handle execute JSON-RPC method."""
+    result = await _process_with_agent(
+        params.messages,
+        context_id=params.contextId,
+        task_id=params.taskId,
+    )
+    response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
+    return JSONResponse(content=response.model_dump())
+
+
+async def _handle_blocking_request(
+    request_id: str,
+    messages: list[A2AMessage],
+    config: MessageConfiguration
+) -> JSONResponse:
+    """Handle blocking request - return result directly."""
+    result = await _process_with_agent(messages, config=config)
+    response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
+    return JSONResponse(content=response.model_dump())
+
+
+async def _handle_nonblocking_request(
+    request_id: str,
+    messages: list[A2AMessage],
+    config: MessageConfiguration
+) -> JSONResponse:
+    """Handle non-blocking request - send immediate ACK and process in background."""
+    # Send immediate acknowledgment
+    ack_response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=None)
+    
+    # Process in background and send via webhook
+    if config.pushNotification:
+        asyncio.create_task(
+            _process_and_notify(
+                messages=messages,
+                config=config,
+                request_id=request_id,
+                webhook_url=config.pushNotification.url,
+                webhook_token=config.pushNotification.token
+            )
+        )
+    
+    return JSONResponse(content=ack_response.model_dump())
+
+@app.post("/a2a/market")
+async def a2a_endpoint(request: Request):
+    """Main A2A protocol endpoint for market analysis requests."""
+    # Parse and validate request
+    body = await _parse_request_body(request)
+    if isinstance(body, JSONResponse):
+        return body  # Error response
+    
+    rpc = await _validate_jsonrpc_request(body)
+    if isinstance(rpc, JSONResponse):
+        return rpc  # Error response
+    
+    # Process the request
     try:
         params = rpc.params
+        
         if isinstance(params, MessageParams):
-            messages = [params.message]
-            config = params.configuration
-            result = await _process_with_agent(messages, config=config)
+            return await _handle_message_send(rpc.id, params)
         elif isinstance(params, ExecuteParams):
-            result = await _process_with_agent(
-                params.messages,
-                context_id=params.contextId,
-                task_id=params.taskId,
-            )
-        else:  # pragma: no cover - defensive
+            return await _handle_execute(rpc.id, params)
+        else:
             raise ValueError("Unsupported params payload")
-
-        resp = JSONRPCResponse(jsonrpc="2.0", id=rpc.id, result=result)
-        return JSONResponse(content=resp.model_dump())
+            
     except Exception as exc:
-        tb = traceback.format_exc()
-        error_response = create_error_response(
-            request_id=rpc.id,
-            code=A2AErrorCode.INTERNAL_ERROR,
-            message="Internal error",
-            data={"details": str(exc), "trace": tb}
-        )
-        return JSONResponse(status_code=500, content=error_response)
+        return _create_internal_error_response(rpc.id, exc)
 
 @app.get("/health")
 async def health_check():
@@ -158,6 +259,10 @@ if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
 
 
+# ===========================
+# Agent Processing
+# ===========================
+
 async def _process_with_agent(
     messages: list[A2AMessage],
     *,
@@ -165,6 +270,7 @@ async def _process_with_agent(
     task_id: str | None = None,
     config: Any | None = None,
 ) -> TaskResult:
+    """Process messages with the market agent."""
     if market_agent is None:
         raise RuntimeError("MarketAgent is not initialized")
 
@@ -176,3 +282,48 @@ async def _process_with_agent(
         task_id=task_id,
         config=processed_config,
     )
+
+
+async def _process_and_notify(
+    messages: list[A2AMessage],
+    config: MessageConfiguration,
+    request_id: str,
+    webhook_url: str,
+    webhook_token: str | None,
+) -> None:
+    """Process request in background and send result via webhook."""
+    try:
+        # Process the request
+        result = await _process_with_agent(messages, config=config)
+        
+        # Build response
+        response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
+        
+        # Send to webhook
+        await send_webhook_notification(
+            url=webhook_url,
+            payload=response.model_dump(),
+            token=webhook_token
+        )
+        print(f"DEBUG: Successfully sent response to webhook")
+    except Exception as exc:
+        print(f"DEBUG: Failed to process and notify: {exc}")
+        traceback.print_exc()
+        
+        # Send error response to webhook
+        try:
+            error_response = create_error_response(
+                request_id=request_id,
+                code=A2AErrorCode.INTERNAL_ERROR,
+                message="Internal error",
+                data={"details": str(exc)}
+            )
+            await send_webhook_notification(
+                url=webhook_url,
+                payload=error_response,
+                token=webhook_token
+            )
+        except Exception:
+            print("DEBUG: Failed to send error notification")
+            traceback.print_exc()
+
