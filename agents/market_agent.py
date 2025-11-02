@@ -4,6 +4,7 @@ import asyncio
 import os
 import re
 from datetime import datetime, timezone
+from html import unescape
 from typing import Any
 
 from models.a2a import A2AMessage, Artifact, MessagePart, TaskResult, TaskStatus
@@ -28,6 +29,17 @@ class MarketAgent:
         self.notification_cooldown = int(os.getenv("NOTIFICATION_COOLDOWN_SECONDS", "900"))
         self.last_notified: dict[str, float] = {}
 
+    @staticmethod
+    def _strip_html(text: str) -> str:
+        """Remove HTML tags and decode HTML entities from text."""
+        # Remove HTML tags
+        text = re.sub(r'<[^>]+>', '', text)
+        # Decode HTML entities (&amp; -> &, &lt; -> <, etc.)
+        text = unescape(text)
+        # Clean up extra whitespace
+        text = ' '.join(text.split())
+        return text
+
     async def process_messages(
         self,
         messages: list[A2AMessage],
@@ -47,6 +59,9 @@ class MarketAgent:
         user_msg = messages[-1]
         text_parts = [part.text for part in user_msg.parts if part.kind == "text" and part.text]
         text = " ".join(text_parts)
+        
+        # Strip HTML tags from text (for platforms like Telex.im)
+        text = self._strip_html(text)
 
         pair = self._extract_pair(text)
         symbol = self._extract_symbol(text)
