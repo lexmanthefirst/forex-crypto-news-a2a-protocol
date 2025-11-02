@@ -57,11 +57,19 @@ class MarketAgent:
             raise ValueError("No messages provided")
 
         user_msg = messages[-1]
-        text_parts = [part.text for part in user_msg.parts if part.kind == "text" and part.text]
+        # Extract only text parts, ignoring conversation history in data parts
+        text_parts = [
+            part.text for part in user_msg.parts 
+            if part.kind == "text" and part.text and part.text.strip()
+        ]
         text = " ".join(text_parts)
         
         # Strip HTML tags from text (for platforms like Telex.im)
         text = self._strip_html(text)
+        
+        # If empty after stripping, return early
+        if not text.strip():
+            raise ValueError("No analyzable text found in message")
 
         pair = self._extract_pair(text)
         symbol = self._extract_symbol(text)
@@ -209,10 +217,13 @@ class MarketAgent:
         for artifact in task.artifacts:
             for part in artifact.parts:
                 if part.kind == "data" and part.data:
-                    return part.data
+                    # Only use dict data, skip list (conversation history)
+                    if isinstance(part.data, dict):
+                        return part.data
         # Fallback to status message data part
         if task.status.message:
             for part in task.status.message.parts:
                 if part.kind == "data" and part.data:
-                    return part.data
+                    if isinstance(part.data, dict):
+                        return part.data
         return {}

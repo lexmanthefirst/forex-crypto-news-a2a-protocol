@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 class MessagePart(BaseModel):
     kind: Literal["text", "data", "file"]
     text: str | None = None
-    data: dict[str, Any] | None = None
+    data: dict[str, Any] | list[Any] | None = None 
     file_url: str | None = None
 
 class A2AMessage(BaseModel):
