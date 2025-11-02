@@ -88,6 +88,7 @@ async def a2a_endpoint(request: Request):
     
     try:
         body = await request.json()
+        print(f"DEBUG: Parsed JSON successfully: {body}")
     except Exception as exc:
         print(f"DEBUG: JSON parse failed: {exc}")
         error_response = create_error_response(
@@ -100,7 +101,9 @@ async def a2a_endpoint(request: Request):
 
     try:
         rpc = JSONRPCRequest(**body)
+        print(f"DEBUG: Valid JSON-RPC request, method={rpc.method}")
     except Exception as exc:
+        print(f"DEBUG: Pydantic validation failed: {exc}")
         request_id = body.get("id") if isinstance(body, dict) else None
         error_response = create_error_response(
             request_id=request_id,
