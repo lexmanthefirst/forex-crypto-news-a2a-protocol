@@ -20,8 +20,9 @@ SYMBOL_RE = re.compile(r"\b(BTC|ETH|LTC|DOGE|XRP)\b", re.IGNORECASE)
 
 
 class MarketAgent:
-    def __init__(self, notifier_webhook: str | None = None, enable_notifications: bool | None = None):
+    def __init__(self, notifier_webhook: str | None = None, notifier_webhook_token: str | None = None, enable_notifications: bool | None = None):
         self.notifier_webhook = notifier_webhook or os.getenv("NOTIFIER_WEBHOOK")
+        self.notifier_webhook_token = notifier_webhook_token or os.getenv("NOTIFIER_WEBHOOK_TOKEN")
         if enable_notifications is None:
             env_value = os.getenv("ENABLE_NOTIFICATIONS", "true").strip().lower()
             enable_notifications = env_value in {"1", "true", "yes", "on"}
@@ -141,7 +142,11 @@ class MarketAgent:
                 }
                 asyncio.create_task(send_console_notification(str(payload)))
                 if self.notifier_webhook:
-                    asyncio.create_task(send_webhook_notification(self.notifier_webhook, payload))
+                    asyncio.create_task(send_webhook_notification(
+                        self.notifier_webhook, 
+                        payload, 
+                        token=self.notifier_webhook_token
+                    ))
                 self.last_notified[key] = now_ts
 
         confidence = float(analysis.get("confidence", 0.0) or 0.0)
