@@ -55,10 +55,7 @@ async def lifespan(_: FastAPI):
     global market_agent
 
     await redis_store.initialize()
-    market_agent = MarketAgent(
-        notifier_webhook=os.getenv("NOTIFIER_WEBHOOK"),
-        notifier_webhook_token=os.getenv("NOTIFIER_WEBHOOK_TOKEN")
-    )
+    market_agent = MarketAgent()
 
     poll_minutes = int(os.getenv("POLL_INTERVAL_MINUTES", "15"))
     scheduler.add_job(_scheduled_analysis_job, "interval", minutes=poll_minutes)
@@ -167,7 +164,7 @@ async def _handle_message_send(request_id: str, params: MessageParams) -> JSONRe
     config = params.configuration
     
     # Check if non-blocking mode (Telex.im pattern)
-    if not config.blocking and config.pushNotification:
+    if not config.blocking and config.pushNotificationConfig:
         return await _handle_nonblocking_request(request_id, messages, config)
     else:
         return await _handle_blocking_request(request_id, messages, config)
@@ -201,18 +198,18 @@ async def _handle_nonblocking_request(
     config: MessageConfiguration
 ) -> JSONResponse:
     """Handle non-blocking request - send immediate ACK and process in background."""
-    # Send immediate acknowledgment
+    # Send immediate acknowledgment with null result
     ack_response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=None)
     
     # Process in background and send via webhook
-    if config.pushNotification:
+    if config.pushNotificationConfig:
         asyncio.create_task(
             _process_and_notify(
                 messages=messages,
                 config=config,
-                request_id=request_id,
-                webhook_url=config.pushNotification.url,
-                webhook_token=config.pushNotification.token
+                webhook_url=config.pushNotificationConfig.url,
+                webhook_token=config.pushNotificationConfig.token,
+                webhook_auth=config.pushNotificationConfig.authentication
             )
         )
     
@@ -290,43 +287,24 @@ async def _process_with_agent(
 async def _process_and_notify(
     messages: list[A2AMessage],
     config: MessageConfiguration,
-    request_id: str,
     webhook_url: str,
-    webhook_token: str | None,
+    webhook_token: str | None = None,
+    webhook_auth: dict[str, Any] | None = None,
 ) -> None:
     """Process request in background and send result via webhook."""
     try:
         # Process the request
         result = await _process_with_agent(messages, config=config)
         
-        # Build response
-        response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
-        
-        # Send to webhook
+        # Send TaskResult directly to webhook (not wrapped in JSON-RPC)
         await send_webhook_notification(
             url=webhook_url,
-            payload=response.model_dump(),
-            token=webhook_token
+            payload=result.model_dump(),
+            token=webhook_token,
+            auth=webhook_auth
         )
-        print(f"DEBUG: Successfully sent response to webhook")
+        print(f"DEBUG: Successfully sent result to webhook: {webhook_url}")
     except Exception as exc:
         print(f"DEBUG: Failed to process and notify: {exc}")
         traceback.print_exc()
-        
-        # Send error response to webhook
-        try:
-            error_response = create_error_response(
-                request_id=request_id,
-                code=A2AErrorCode.INTERNAL_ERROR,
-                message="Internal error",
-                data={"details": str(exc)}
-            )
-            await send_webhook_notification(
-                url=webhook_url,
-                payload=error_response,
-                token=webhook_token
-            )
-        except Exception:
-            print("DEBUG: Failed to send error notification")
-            traceback.print_exc()
 

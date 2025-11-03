@@ -29,7 +29,7 @@ class PushNotificationConfig(BaseModel):
 class MessageConfiguration(BaseModel):
     blocking: bool = True
     acceptedOutputModes: list[str] = Field(default_factory=lambda: ["text/plain", "application/json"])
-    pushNotification: PushNotificationConfig | None = None
+    pushNotificationConfig: PushNotificationConfig | None = None
 
 # Params objects for JSON-RPC
 class MessageParams(BaseModel):

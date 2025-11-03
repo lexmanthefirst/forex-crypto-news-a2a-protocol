@@ -14,11 +14,18 @@ async def send_webhook_notification(
     url: str,
     payload: Mapping[str, Any],
     token: str | None = None,
+    auth: dict[str, Any] | None = None,
     timeout: float = 10.0,
 ) -> None:
+    """Send result to webhook URL"""
     headers = {"Content-Type": "application/json"}
+    
+    # Handle authentication - check for token first, then auth dict
     if token:
         headers["Authorization"] = f"Bearer {token}"
+    elif auth and auth.get("schemes") == ["Bearer"]:
+        if "credentials" in auth:
+            headers["Authorization"] = f"Bearer {auth['credentials']}"
 
     async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.post(url, json=dict(payload), headers=headers)
