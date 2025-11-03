@@ -207,6 +207,7 @@ async def _handle_nonblocking_request(
             _process_and_notify(
                 messages=messages,
                 config=config,
+                request_id=request_id,  # Pass request_id for JSON-RPC response
                 webhook_url=config.pushNotificationConfig.url,
                 webhook_token=config.pushNotificationConfig.token,
                 webhook_auth=config.pushNotificationConfig.authentication
@@ -287,6 +288,7 @@ async def _process_with_agent(
 async def _process_and_notify(
     messages: list[A2AMessage],
     config: MessageConfiguration,
+    request_id: str,
     webhook_url: str,
     webhook_token: str | None = None,
     webhook_auth: dict[str, Any] | None = None,
@@ -296,10 +298,13 @@ async def _process_and_notify(
         # Process the request
         result = await _process_with_agent(messages, config=config)
         
-        # Send TaskResult directly to webhook (not wrapped in JSON-RPC)
+        # Wrap result in JSON-RPC response (required by Telex.im)
+        response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
+        
+        # Send JSON-RPC response to webhook
         await send_webhook_notification(
             url=webhook_url,
-            payload=result.model_dump(),
+            payload=response.model_dump(),
             token=webhook_token,
             auth=webhook_auth
         )
@@ -307,4 +312,22 @@ async def _process_and_notify(
     except Exception as exc:
         print(f"DEBUG: Failed to process and notify: {exc}")
         traceback.print_exc()
+        
+        # Try to send error response to webhook
+        try:
+            error_response = create_error_response(
+                request_id=request_id,
+                code=A2AErrorCode.INTERNAL_ERROR,
+                message="Internal error",
+                data={"details": str(exc)}
+            )
+            await send_webhook_notification(
+                url=webhook_url,
+                payload=error_response,
+                token=webhook_token,
+                auth=webhook_auth
+            )
+        except Exception:
+            print("DEBUG: Failed to send error notification")
+            traceback.print_exc()
 
