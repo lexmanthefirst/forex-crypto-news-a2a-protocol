@@ -19,6 +19,7 @@ async def send_webhook_notification(
 ) -> None:
     """Send result to webhook URL"""
     import json
+    import sys
     
     headers = {"Content-Type": "application/json"}
     
@@ -29,21 +30,33 @@ async def send_webhook_notification(
         if "credentials" in auth:
             headers["Authorization"] = f"Bearer {auth['credentials']}"
 
-    # Debug logging
-    print("=" * 80)
-    print("WEBHOOK DEBUG INFO:")
-    print(f"URL: {url}")
-    print(f"Token present: {token is not None}")
-    print(f"Auth dict: {auth}")
-    print(f"Headers: {headers}")
-    print("Payload preview (first 500 chars):")
+    # Debug logging - use sys.stderr to ensure it's captured
+    debug_msg = "=" * 80 + "\n"
+    debug_msg += "WEBHOOK DEBUG INFO:\n"
+    debug_msg += f"URL: {url}\n"
+    debug_msg += f"Token present: {token is not None}\n"
+    debug_msg += f"Token value (first 20 chars): {token[:20] if token else 'None'}...\n"
+    debug_msg += f"Auth dict: {auth}\n"
+    debug_msg += f"Headers keys: {list(headers.keys())}\n"
+    debug_msg += "Payload preview (first 1000 chars):\n"
     payload_str = json.dumps(dict(payload), indent=2)
-    print(payload_str[:500])
-    print("=" * 80)
+    debug_msg += payload_str[:1000] + "\n"
+    debug_msg += "=" * 80 + "\n"
+    
+    sys.stderr.write(debug_msg)
+    sys.stderr.flush()
+    
+    logging.info(f"Sending webhook to {url}")
 
     async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.post(url, json=dict(payload), headers=headers)
-        print(f"Webhook response status: {response.status_code}")
+        
+        error_msg = f"Webhook response status: {response.status_code}\n"
         if response.status_code >= 400:
-            print(f"Webhook error response body: {response.text}")
+            error_msg += f"Webhook error response body: {response.text}\n"
+            error_msg += f"Response headers: {dict(response.headers)}\n"
+        
+        sys.stderr.write(error_msg)
+        sys.stderr.flush()
+        
         response.raise_for_status()
