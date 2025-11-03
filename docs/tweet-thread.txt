@@ -1,0 +1,41 @@
+TWEET 1/5:
+Just built a Market Intelligence A2A Agent that brings AI-powered crypto and forex analysis to your fingertips. Natural language queries, real-time data, and automated insights all in one API.
+
+Built with @GoogleAI Gemini, FastAPI, and Redis.
+
+TWEET 2/5:
+How it works:
+- Ask in plain English: "Analyze BTC" or "What's the outlook for EUR/USD?"
+- Get AI analysis with technical indicators (SMA, volatility, 7-day trends)
+- Aggregated news from multiple sources
+- Real-time price data
+
+All via JSON-RPC 2.0
+
+TWEET 3/5:
+Key features:
+- Multi-source news (CryptoPanic, NewsAPI)
+- Technical analysis with price history
+- Webhook notifications for alerts
+- Scheduled watchlist monitoring
+- Docker-ready deployment
+- Integrated with @teleximapp A2A protocol
+
+TWEET 4/5:
+The architecture is modular and production-ready:
+- Redis session storage
+- Background scheduled jobs
+- Non-blocking webhook responses
+- GitHub Actions CI/CD
+- Published to GitHub Container Registry
+
+Open source and ready to deploy.
+
+TWEET 5/5:
+Perfect for traders, developers, or anyone building AI agents that need market intelligence.
+
+Check it out: https://github.com/lexmanthefirst/forex-crypto-news-a2a-protocol
+
+Built as part of @hnginternship
+
+#AI #Crypto #Forex #A2A #AgentToAgent #FastAPI

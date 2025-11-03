@@ -1,0 +1,28 @@
+{
+  "jsonrpc": "2.0",
+  "id": "test-123",
+  "method": "message/send",
+  "params": {
+    "message": {
+      "kind": "message",
+      "role": "user",
+      "parts": [
+        {
+          "kind": "text",
+          "text": "analyze BTC"
+        }
+      ]
+    },
+    "configuration": {
+      "blocking": false,
+      "acceptedOutputModes": ["text/plain"],
+      "pushNotificationConfig": {
+        "url": "https://ping.telex.im/v1/a2a/webhooks/test-webhook",
+        "token": "test-token-123",
+        "authentication": {
+          "schemes": ["Bearer"]
+        }
+      }
+    }
+  }
+}
