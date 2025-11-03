@@ -4,31 +4,107 @@ Simple technical analysis helpers for crypto/forex.
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Any
 
 import httpx
+
+# coin ID map for common cryptocurrencies
+COIN_ID_MAP = {
+    "BTC": "bitcoin",
+    "ETH": "ethereum",
+    "XRP": "ripple",
+    "LTC": "litecoin",
+    "BCH": "bitcoin-cash",
+    "SOL": "solana",
+    "ADA": "cardano",
+    "DOT": "polkadot",
+    "DOGE": "dogecoin",
+    "MATIC": "matic-network",
+    "AVAX": "avalanche-2",
+    "LINK": "chainlink",
+    "UNI": "uniswap",
+    "ATOM": "cosmos",
+    "BNB": "binancecoin",
+    "USDT": "tether",
+    "USDC": "usd-coin",
+    "TRX": "tron",
+    "TON": "the-open-network",
+    "XLM": "stellar",
+    "SHIB": "shiba-inu",
+    "APT": "aptos",
+    "ARB": "arbitrum",
+    "OP": "optimism",
+    "INJ": "injective-protocol",
+    "SUI": "sui",
+    "NEAR": "near",
+    "FET": "fetch-ai",
+    "PEPE": "pepe",
+    "WIF": "dogwifcoin",
+}
+
+COINGECKO_BASE = os.getenv("COINGECKO_BASE", "https://api.coingecko.com/api/v3")
+COINGECKO_API_KEY = os.getenv("COINGECKO_API_KEY", "")
+
+
+async def _search_coingecko_id(symbol: str) -> str | None:
+    """Search CoinGecko for a coin ID by symbol."""
+    url = f"{COINGECKO_BASE}/search"
+    params = {"query": symbol}
+    
+    headers = {"Accept": "application/json"}
+    if COINGECKO_API_KEY:
+        params["x_cg_demo_api_key"] = COINGECKO_API_KEY
+    
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(url, params=params, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+        
+        coins = data.get("coins", [])
+        for coin in coins:
+            if coin.get("symbol", "").upper() == symbol.upper():
+                coin_id = coin.get("id")
+                print(f"DEBUG: Found CoinGecko ID '{coin_id}' for symbol '{symbol}'")
+                return coin_id
+        
+        if coins:
+            coin_id = coins[0].get("id")
+            print(f"DEBUG: Using first result '{coin_id}' for symbol '{symbol}'")
+            return coin_id
+            
+    except httpx.HTTPError as exc:
+        print(f"DEBUG: CoinGecko search failed for '{symbol}': {exc}")
+    
+    return symbol.lower()
 
 
 async def fetch_price_history(symbol: str, days: int = 7) -> list[float]:
     """
     Fetch historical prices for technical analysis.
     Uses CoinGecko market_chart endpoint for crypto.
+    Supports any cryptocurrency symbol dynamically.
     """
-    coin_id_map = {
-        "BTC": "bitcoin",
-        "ETH": "ethereum",
-        "XRP": "ripple",
-        "LTC": "litecoin",
-    }
+    symbol_upper = symbol.upper()
     
-    coin_id = coin_id_map.get(symbol.upper(), symbol.lower())
-    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
+    # Try to get coin ID from map, otherwise search for it
+    if symbol_upper in COIN_ID_MAP:
+        coin_id = COIN_ID_MAP[symbol_upper]
+    else:
+        coin_id = await _search_coingecko_id(symbol_upper)
+    
+    url = f"{COINGECKO_BASE}/coins/{coin_id}/market_chart"
     params = {"vs_currency": "usd", "days": str(days)}
     
-    print(f"DEBUG: Fetching {days}-day price history for {symbol} from CoinGecko...")
+    headers = {"Accept": "application/json"}
+    if COINGECKO_API_KEY:
+        params["x_cg_demo_api_key"] = COINGECKO_API_KEY
+    
+    print(f"DEBUG: Fetching {days}-day price history for {symbol} (coin_id: {coin_id})...")
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(url, params=params)
+            response = await client.get(url, params=params, headers=headers)
             response.raise_for_status()
             data = response.json()
         

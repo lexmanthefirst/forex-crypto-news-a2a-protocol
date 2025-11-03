@@ -17,7 +17,8 @@ ALPHAVANTAGE_KEY = os.getenv("ALPHAVANTAGE_API_KEY", "")
 NEWSAPI_KEY = os.getenv("NEWSAPI_API_KEY", "")
 CRYPTOPANIC_KEY = os.getenv("CRYPTOPANIC_API_KEY", "")
 
-# Small helper map for common coin tickers to their CoinGecko IDs
+# Helper map for common coin tickers to their CoinGecko IDs
+# Extended to support more cryptocurrencies
 COIN_ID_MAP = {
     "BTC": "bitcoin",
     "ETH": "ethereum",
@@ -25,6 +26,30 @@ COIN_ID_MAP = {
     "LTC": "litecoin",
     "BCH": "bitcoin-cash",
     "SOL": "solana",
+    "ADA": "cardano",
+    "DOT": "polkadot",
+    "DOGE": "dogecoin",
+    "MATIC": "matic-network",
+    "AVAX": "avalanche-2",
+    "LINK": "chainlink",
+    "UNI": "uniswap",
+    "ATOM": "cosmos",
+    "BNB": "binancecoin",
+    "USDT": "tether",
+    "USDC": "usd-coin",
+    "TRX": "tron",
+    "TON": "the-open-network",
+    "XLM": "stellar",
+    "SHIB": "shiba-inu",
+    "APT": "aptos",
+    "ARB": "arbitrum",
+    "OP": "optimism",
+    "INJ": "injective-protocol",
+    "SUI": "sui",
+    "NEAR": "near",
+    "FET": "fetch-ai",
+    "PEPE": "pepe",
+    "WIF": "dogwifcoin",
 }
 
 
@@ -38,12 +63,64 @@ def _normalize_timestamp(timestamp: str | None) -> str | None:
     return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+async def _search_coingecko_id(symbol: str) -> str | None:
+    """Search CoinGecko for a coin ID by symbol.
+    Returns the coin ID if found, otherwise returns the symbol in lowercase as fallback.
+    """
+    url = f"{COINGECKO_BASE}/search"
+    params = {"query": symbol}
+    
+    headers = {"Accept": "application/json"}
+    if COINGECKO_API_KEY:
+        params["x_cg_demo_api_key"] = COINGECKO_API_KEY
+    
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(url, params=params, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+        
+        # Look for exact symbol match in coins
+        coins = data.get("coins", [])
+        for coin in coins:
+            if coin.get("symbol", "").upper() == symbol.upper():
+                coin_id = coin.get("id")
+                print(f"DEBUG: Found CoinGecko ID '{coin_id}' for symbol '{symbol}'")
+                return coin_id
+        
+        # If no exact match, try to use the first result if it's close
+        if coins:
+            coin_id = coins[0].get("id")
+            print(f"DEBUG: Using first result '{coin_id}' for symbol '{symbol}'")
+            return coin_id
+            
+    except httpx.HTTPError as exc:
+        print(f"DEBUG: CoinGecko search API failed for '{symbol}': {exc}")
+    
+    # Fallback to lowercase symbol
+    print(f"DEBUG: No CoinGecko ID found for '{symbol}', using lowercase as fallback")
+    return symbol.lower()
+
+
 async def fetch_crypto_prices(symbols: Iterable[str]) -> dict[str, float]:
     symbol_list = [symbol.upper() for symbol in symbols]
     if not symbol_list:
         return {}
 
-    coin_ids = [COIN_ID_MAP.get(symbol, symbol.lower()) for symbol in symbol_list]
+    # Get coin IDs - use map first, then search for unknown symbols
+    coin_ids = []
+    symbol_to_id = {}
+    
+    for symbol in symbol_list:
+        if symbol in COIN_ID_MAP:
+            coin_id = COIN_ID_MAP[symbol]
+        else:
+            # Try to find the coin ID dynamically
+            coin_id = await _search_coingecko_id(symbol)
+        
+        coin_ids.append(coin_id)
+        symbol_to_id[symbol] = coin_id
+    
     params = {"ids": ",".join(coin_ids), "vs_currencies": "usd"}
     url = f"{COINGECKO_BASE}/simple/price"
 
@@ -63,7 +140,8 @@ async def fetch_crypto_prices(symbols: Iterable[str]) -> dict[str, float]:
         return {}
 
     prices: dict[str, float] = {}
-    for symbol, coin_id in zip(symbol_list, coin_ids):
+    for symbol in symbol_list:
+        coin_id = symbol_to_id[symbol]
         usd_price = data.get(coin_id, {}).get("usd")
         if usd_price is not None:
             prices[symbol] = float(usd_price)

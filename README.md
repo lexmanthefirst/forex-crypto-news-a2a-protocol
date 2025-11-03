@@ -4,7 +4,10 @@ A FastAPI-based Agent-to-Agent (A2A) protocol service that provides real-time cr
 
 ## Features
 
-- Natural language market analysis for cryptocurrencies (BTC, ETH, etc.) and forex pairs (EUR/USD, etc.)
+- Natural language market analysis for ANY cryptocurrency or forex pair
+- **Comprehensive Market Summaries** - Get best/worst performers, trending coins, newly added tokens
+- Dynamic symbol support - supports BTC, ETH, SOL, MATIC, PEPE, and hundreds more
+- Automatic CoinGecko ID lookup for unknown crypto symbols
 - AI-powered insights using Google Gemini
 - Technical analysis with price trends, SMA, and volatility calculations
 - Multi-source news aggregation (CryptoPanic, NewsAPI)
@@ -88,13 +91,41 @@ curl -X POST http://localhost:8000/a2a/market \
   }'
 ```
 
-### Example Analysis Request
+### Example Analysis Requests
 
-The agent accepts natural language queries like:
+The agent accepts natural language queries for ANY cryptocurrency or forex pair:
 
-- "Analyze BTC"
+**Individual Asset Analysis:**
+
+- "Analyze BTC" or "Analyze Bitcoin"
+- "What's happening with PEPE?"
+- "Give me a technical analysis of SOL"
+- "Show me MATIC analysis"
+- "Analyze Arbitrum" (automatically maps to ARB)
+- "What about Dogecoin?"
+
+**Forex Pairs:**
+
 - "What's the outlook for EUR/USD?"
-- "Give me a technical analysis of ETH"
+- "Analyze GBP/JPY"
+- "Show me USD/CHF analysis"
+
+**Market Summary Requests:**
+
+- "Summarize crypto and forex movements today"
+- "What's happening in the market?"
+- "Show me market overview"
+- "What are the best performing coins?"
+- "What are the worst performers today?"
+- "Show me trending cryptocurrencies"
+- "What's the market status?"
+
+The agent will automatically:
+
+- Extract the symbol or pair from your query
+- Look up the correct CoinGecko ID if needed
+- Fetch real-time prices and 7-day history
+- Generate AI-powered analysis with technical indicators
 
 ## Response Format
 

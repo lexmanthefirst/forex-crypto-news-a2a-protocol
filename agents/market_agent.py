@@ -9,14 +9,18 @@ from typing import Any
 
 from models.a2a import A2AMessage, Artifact, MessagePart, TaskResult, TaskStatus
 from utils.gemini_client import analyze_sync
+from utils.market_summary import get_comprehensive_market_summary, format_market_summary_text
 from utils.news_fetcher import fetch_combined_news, fetch_crypto_prices, fetch_forex_rate
 from utils.notifier import send_console_notification, send_webhook_notification
 from utils.redis_client import redis_store
 from utils.technical_analysis import get_technical_summary
 
-# small regex to extract currency pair or coin symbol
+# Regex to extract currency pair or coin symbol
+# Matches forex pairs like EUR/USD, EUR-USD, or EURUSD
 PAIR_RE = re.compile(r"([A-Za-z]{3,5})\s*[/\-]\s*([A-Za-z]{3,5})")
-SYMBOL_RE = re.compile(r"\b(BTC|ETH|LTC|DOGE|XRP)\b", re.IGNORECASE)
+# Matches any crypto symbol (2-5 uppercase letters) as a standalone word
+# Common patterns: BTC, ETH, USDT, BNB, SOL, ADA, MATIC, etc.
+SYMBOL_RE = re.compile(r"\b([A-Z]{2,5})\b")
 
 
 class MarketAgent:
@@ -71,6 +75,10 @@ class MarketAgent:
         # If empty after stripping, return early
         if not text.strip():
             raise ValueError("No analyzable text found in message")
+
+        # Check if this is a market summary/overview request
+        if self._is_market_summary_request(text):
+            return await self._handle_market_summary(messages, context_id, task_id)
 
         pair = self._extract_pair(text)
         symbol = self._extract_symbol(text)
@@ -194,8 +202,45 @@ class MarketAgent:
         return None
 
     def _extract_symbol(self, text: str) -> str | None:
-        m = SYMBOL_RE.search(text)
-        return m.group(1).upper() if m else None
+        """Extract cryptocurrency symbol from text.
+        Looks for common crypto symbols and keywords like 'Bitcoin', 'Ethereum', etc.
+        """
+        # First try direct regex match for crypto symbols
+        m = SYMBOL_RE.search(text.upper())
+        if m:
+            symbol = m.group(1).upper()
+            # Filter out common English words that might match
+            excluded_words = {"TO", "THE", "AND", "OR", "FOR", "IN", "ON", "AT", "BY", "IS", "ARE", "WAS", "IT"}
+            if symbol not in excluded_words:
+                return symbol
+        
+        # Try to match common cryptocurrency names
+        crypto_map = {
+            "bitcoin": "BTC",
+            "ethereum": "ETH",
+            "litecoin": "LTC",
+            "ripple": "XRP",
+            "dogecoin": "DOGE",
+            "cardano": "ADA",
+            "polkadot": "DOT",
+            "solana": "SOL",
+            "polygon": "MATIC",
+            "chainlink": "LINK",
+            "avalanche": "AVAX",
+            "uniswap": "UNI",
+            "cosmos": "ATOM",
+            "binance coin": "BNB",
+            "bnb": "BNB",
+            "tether": "USDT",
+            "usdc": "USDC",
+        }
+        
+        text_lower = text.lower()
+        for name, symbol in crypto_map.items():
+            if name in text_lower:
+                return symbol
+        
+        return None
 
     def _filter_relevant_news(
         self,
@@ -232,3 +277,90 @@ class MarketAgent:
                     if isinstance(part.data, dict):
                         return part.data
         return {}
+
+    def _is_market_summary_request(self, text: str) -> bool:
+        """Detect if the request is asking for a market summary/overview."""
+        text_lower = text.lower()
+        
+        # Keywords that indicate market summary requests
+        summary_keywords = [
+            "summarize",
+            "summary",
+            "overview",
+            "what's happening",
+            "market update",
+            "today's market",
+            "movements today",
+            "market movements",
+            "how are markets",
+            "market status",
+            "market snapshot",
+            "best performing",
+            "worst performing",
+            "top gainers",
+            "top losers",
+            "trending",
+            "newly added",
+            "new coins",
+            "market overview",
+        ]
+        
+        # Check if any keyword is present and no specific symbol is being requested
+        has_summary_keyword = any(keyword in text_lower for keyword in summary_keywords)
+        
+        # If it has summary keywords, it's likely a market summary request
+        return has_summary_keyword
+
+    async def _handle_market_summary(
+        self,
+        messages: list[A2AMessage],
+        context_id: str,
+        task_id: str,
+    ) -> TaskResult:
+        """Handle market summary requests with comprehensive market data."""
+        print("DEBUG: Handling market summary request")
+        
+        # Fetch comprehensive market data
+        summary = await get_comprehensive_market_summary()
+        
+        # Format as human-readable text
+        summary_text = format_market_summary_text(summary)
+        
+        # Create agent response message
+        agent_msg = A2AMessage(
+            role="agent",
+            parts=[
+                MessagePart(kind="text", text=summary_text),
+                MessagePart(kind="data", data=summary),
+            ],
+        )
+        
+        # Build artifacts
+        artifacts = [
+            Artifact(
+                name="market_summary",
+                parts=[MessagePart(kind="data", data=summary)]
+            ),
+            Artifact(
+                name="top_performers",
+                parts=[MessagePart(kind="data", data=summary.get("crypto", {}).get("best_performers_24h", []))]
+            ),
+            Artifact(
+                name="worst_performers",
+                parts=[MessagePart(kind="data", data=summary.get("crypto", {}).get("worst_performers_24h", []))]
+            ),
+            Artifact(
+                name="trending_coins",
+                parts=[MessagePart(kind="data", data=summary.get("crypto", {}).get("trending", []))]
+            ),
+        ]
+        
+        task_status = TaskStatus(state="input-required", message=agent_msg)
+        
+        return TaskResult(
+            id=task_id,
+            contextId=context_id,
+            status=task_status,
+            artifacts=artifacts,
+            history=messages + [agent_msg],
+        )
