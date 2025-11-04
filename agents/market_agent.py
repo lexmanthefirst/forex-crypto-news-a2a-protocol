@@ -175,7 +175,7 @@ class MarketAgent:
         if technical_data:
             artifacts.append(Artifact(name="technical_indicators", parts=[MessagePart(kind="data", data=technical_data)]))
 
-        status_state = "input-required"
+        status_state = "completed"
         if (pair and price_snapshot.get("pair", {}).get("rate") is None) and (not symbol):
             status_state = "failed"
 
@@ -355,7 +355,7 @@ class MarketAgent:
             ),
         ]
         
-        task_status = TaskStatus(state="input-required", message=agent_msg)
+        task_status = TaskStatus(state="completed", message=agent_msg)
         
         return TaskResult(
             id=task_id,
