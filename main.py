@@ -299,12 +299,13 @@ async def _process_and_notify(
         result = await _process_with_agent(messages, config=config)
         
         # Wrap result in JSON-RPC response (required by Telex.im)
+        # Use model_dump_json with exclude_none to match chess agent pattern
         response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
         
-        # Send JSON-RPC response to webhook
+        # Send JSON-RPC response to webhook using proper serialization
         await send_webhook_notification(
             url=webhook_url,
-            payload=response.model_dump(),
+            payload=response.model_dump(mode='json', exclude_none=True),
             token=webhook_token,
             auth=webhook_auth
         )
