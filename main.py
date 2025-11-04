@@ -58,6 +58,9 @@ app.add_middleware(
 scheduler = AsyncIOScheduler()
 market_agent: MarketAgent | None = None
 
+# Track background tasks to prevent garbage collection
+background_tasks: set[asyncio.Task] = set()
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     global market_agent
@@ -249,8 +252,18 @@ async def _handle_nonblocking_request(
                 config=config
             )
         )
-        # Add done callback to catch exceptions
-        task.add_done_callback(lambda t: _handle_task_exception(t, task_id))
+        
+        # Add to global set to prevent garbage collection
+        background_tasks.add(task)
+        
+        # Add done callback to catch exceptions and cleanup
+        def cleanup_task(t: asyncio.Task) -> None:
+            background_tasks.discard(t)
+            _handle_task_exception(t, task_id)
+        
+        task.add_done_callback(cleanup_task)
+        
+        print(f"✅ Background task created and tracked (total: {len(background_tasks)})")
     except Exception as exc:
         print(f"❌ Failed to spawn background task: {exc}")
         traceback.print_exc()
@@ -270,6 +283,13 @@ async def _process_and_notify(
 ) -> None:
     """Process task in background and send webhook notifications."""
     import httpx
+    import sys
+    
+    # Immediate logging to stdout/stderr
+    sys.stderr.write(f"\n{'='*60}\n")
+    sys.stderr.write(f"🔄 BACKGROUND TASK STARTED for {task_id}\n")
+    sys.stderr.write(f"{'='*60}\n\n")
+    sys.stderr.flush()
     
     print(f"\n{'='*60}")
     print(f"🔄 BACKGROUND TASK STARTED for {task_id}")
