@@ -182,7 +182,7 @@ async def _handle_execute(request_id: str, params: ExecuteParams) -> JSONRespons
         task_id=params.taskId,
     )
     response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
-    return JSONResponse(content=response.model_dump(mode="json"))
+    return JSONResponse(content=response.model_dump())
 
 
 async def _handle_blocking_request(
