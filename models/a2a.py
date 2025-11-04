@@ -71,3 +71,17 @@ class JSONRPCResponse(BaseModel):
     id: str
     result: TaskResult | None = None
     error: dict[str, Any] | None = None
+
+    def model_dump(self, **kwargs):
+        """Ensure proper JSON-RPC response format.
+        - Include 'result' field with full data (including artifacts)
+        - Exclude 'error' field when None (JSON-RPC spec: either result OR error, not both)
+        """
+        data = super().model_dump(**kwargs)
+        # Remove error field if it's None (proper JSON-RPC: either result or error, never both)
+        if self.error is None and 'error' in data:
+            del data['error']
+        # Remove result field if error is present
+        if self.error is not None and 'result' in data:
+            del data['result']
+        return data

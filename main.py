@@ -182,7 +182,8 @@ async def _handle_execute(request_id: str, params: ExecuteParams) -> JSONRespons
         task_id=params.taskId,
     )
     response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
-    return JSONResponse(content=response.model_dump())
+    # Explicitly include all fields, exclude None values except for result/error
+    return JSONResponse(content=response.model_dump(mode='json', exclude_none=False))
 
 
 async def _handle_blocking_request(
@@ -193,7 +194,8 @@ async def _handle_blocking_request(
     """Handle blocking request - return result directly."""
     result = await _process_with_agent(messages, config=config)
     response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
-    return JSONResponse(content=response.model_dump())
+    # Explicitly include all fields with proper JSON serialization
+    return JSONResponse(content=response.model_dump(mode='json', exclude_none=False))
 
 
 @app.post("/a2a/agent/market")
