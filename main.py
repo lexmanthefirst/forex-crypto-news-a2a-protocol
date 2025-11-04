@@ -21,6 +21,7 @@ import asyncio
 import os
 import traceback
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Any, Awaitable, cast
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -41,6 +42,7 @@ from models.a2a import (
     MessageParams,
     MessagePart,
     TaskResult,
+    TaskStatus,
 )
 from utils.errors import A2AErrorCode, create_error_response
 from utils.redis_client import redis_store
@@ -169,9 +171,13 @@ async def _handle_message_send(request_id: str, params: MessageParams) -> JSONRe
     messages = [params.message]
     config = params.configuration
     
-    # ALWAYS use blocking mode (synchronous response) like the working examples
-    # This avoids webhook issues with Telex.im
-    return await _handle_blocking_request(request_id, messages, config)
+    # Respect the blocking preference from client
+    if config.blocking:
+        # Client wants synchronous response
+        return await _handle_blocking_request(request_id, messages, config)
+    else:
+        # Client wants async with webhooks
+        return await _handle_nonblocking_request(request_id, messages, config)
 
 
 async def _handle_execute(request_id: str, params: ExecuteParams) -> JSONResponse:
@@ -196,6 +202,129 @@ async def _handle_blocking_request(
     response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
     # Explicitly include all fields with proper JSON serialization
     return JSONResponse(content=response.model_dump(mode='json', exclude_none=False))
+
+
+async def _handle_nonblocking_request(
+    request_id: str,
+    messages: list[A2AMessage],
+    config: MessageConfiguration
+) -> JSONResponse:
+    """Handle non-blocking request - return task immediately, send updates via webhook."""
+    from uuid import uuid4
+    
+    # Generate task info
+    task_id = f"task-{uuid4()}"
+    context_id = messages[0].taskId or f"context-{uuid4()}"
+    
+    # Return immediate response with "submitted" status
+    initial_task = TaskResult(
+        id=task_id,
+        contextId=context_id,
+        status=TaskStatus(
+            state="submitted",
+            message=A2AMessage(
+                role="agent",
+                parts=[MessagePart(kind="text", text="Task received and queued for processing")]
+            )
+        ),
+        artifacts=[],
+        history=[]
+    )
+    
+    # Start background processing
+    asyncio.create_task(
+        _process_and_notify(
+            task_id=task_id,
+            context_id=context_id,
+            messages=messages,
+            config=config
+        )
+    )
+    
+    # Return immediate response
+    response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=initial_task)
+    return JSONResponse(content=response.model_dump(mode='json', exclude_none=False))
+
+
+async def _process_and_notify(
+    task_id: str,
+    context_id: str,
+    messages: list[A2AMessage],
+    config: MessageConfiguration
+) -> None:
+    """Process task in background and send webhook notifications."""
+    import httpx
+    
+    webhook_url = config.pushNotificationConfig.url if config.pushNotificationConfig else None
+    if not webhook_url:
+        print(f"WARNING: Non-blocking request without webhook URL, task {task_id}")
+        return
+    
+    headers = {"Content-Type": "application/json"}
+    
+    # Add authentication if provided
+    if config.pushNotificationConfig and config.pushNotificationConfig.token:
+        headers["Authorization"] = f"Bearer {config.pushNotificationConfig.token}"
+    
+    try:
+        # Process the task
+        result = await _process_with_agent(
+            messages,
+            context_id=context_id,
+            task_id=task_id,
+            config=config
+        )
+        
+        # Send completion notification via webhook
+        webhook_payload = {
+            "jsonrpc": "2.0",
+            "method": "task/update",
+            "params": {
+                "id": task_id,
+                "contextId": context_id,
+                "status": result.status.model_dump(mode='json'),
+                "artifacts": [art.model_dump(mode='json') for art in result.artifacts],
+                "history": [msg.model_dump(mode='json') for msg in result.history]
+            }
+        }
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                webhook_url,
+                json=webhook_payload,
+                headers=headers
+            )
+            print(f"DEBUG: Webhook sent to {webhook_url}, status={response.status_code}")
+            if response.status_code >= 400:
+                print(f"WARNING: Webhook failed: {response.text}")
+                
+    except Exception as exc:
+        print(f"ERROR: Failed to process/notify task {task_id}: {exc}")
+        traceback.print_exc()
+        
+        # Send error notification
+        try:
+            error_payload = {
+                "jsonrpc": "2.0",
+                "method": "task/update",
+                "params": {
+                    "id": task_id,
+                    "contextId": context_id,
+                    "status": {
+                        "state": "failed",
+                        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                        "message": {
+                            "role": "agent",
+                            "parts": [{"kind": "text", "text": f"Task processing failed: {str(exc)}"}]
+                        }
+                    }
+                }
+            }
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                await client.post(webhook_url, json=error_payload, headers=headers)
+        except Exception:
+            pass  # Best effort error notification
 
 
 @app.post("/a2a/agent/market")
