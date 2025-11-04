@@ -30,6 +30,9 @@ async def send_webhook_notification(
         if "credentials" in auth:
             headers["Authorization"] = f"Bearer {auth['credentials']}"
 
+    # Convert payload to proper dict for JSON serialization
+    payload_dict = dict(payload) if not isinstance(payload, dict) else payload
+    
     # Debug logging - use sys.stderr to ensure it's captured
     debug_msg = "=" * 80 + "\n"
     debug_msg += "WEBHOOK DEBUG INFO:\n"
@@ -38,9 +41,14 @@ async def send_webhook_notification(
     debug_msg += f"Token value (first 20 chars): {token[:20] if token else 'None'}...\n"
     debug_msg += f"Auth dict: {auth}\n"
     debug_msg += f"Headers keys: {list(headers.keys())}\n"
-    debug_msg += "Payload preview (first 1000 chars):\n"
-    payload_str = json.dumps(dict(payload), indent=2)
-    debug_msg += payload_str[:1000] + "\n"
+    debug_msg += "Full payload JSON:\n"
+    try:
+        payload_json = json.dumps(payload_dict, indent=2, default=str)
+        debug_msg += payload_json + "\n"
+    except Exception as e:
+        debug_msg += f"ERROR serializing payload: {e}\n"
+        debug_msg += f"Payload type: {type(payload)}\n"
+        debug_msg += f"Payload repr: {repr(payload)[:500]}\n"
     debug_msg += "=" * 80 + "\n"
     
     sys.stderr.write(debug_msg)
@@ -49,7 +57,7 @@ async def send_webhook_notification(
     logging.info(f"Sending webhook to {url}")
 
     async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.post(url, json=dict(payload), headers=headers)
+        response = await client.post(url, json=payload_dict, headers=headers)
         
         error_msg = f"Webhook response status: {response.status_code}\n"
         if response.status_code >= 400:
