@@ -170,11 +170,9 @@ async def _handle_message_send(request_id: str, params: MessageParams) -> JSONRe
     messages = [params.message]
     config = params.configuration
     
-    # Check if non-blocking mode (Telex.im pattern)
-    if not config.blocking and config.pushNotificationConfig:
-        return await _handle_nonblocking_request(request_id, messages, config)
-    else:
-        return await _handle_blocking_request(request_id, messages, config)
+    # ALWAYS use blocking mode (synchronous response) like the working examples
+    # This avoids webhook issues with Telex.im
+    return await _handle_blocking_request(request_id, messages, config)
 
 
 async def _handle_execute(request_id: str, params: ExecuteParams) -> JSONResponse:
@@ -223,7 +221,7 @@ async def _handle_nonblocking_request(
     
     return JSONResponse(content=ack_response.model_dump())
 
-@app.post("/a2a/market")
+@app.post("/a2a/agent/market")
 async def a2a_endpoint(request: Request):
     """Main A2A protocol endpoint for market analysis requests."""
     # Parse and validate request
