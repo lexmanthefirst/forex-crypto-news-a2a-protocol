@@ -62,7 +62,10 @@ async def lifespan(_: FastAPI):
     global market_agent
 
     await redis_store.initialize()
-    market_agent = MarketAgent()
+    market_agent = MarketAgent(
+        notifier_webhook=os.getenv("NOTIFIER_WEBHOOK"),
+        notifier_webhook_token=os.getenv("NOTIFIER_WEBHOOK_TOKEN")
+    )
 
     poll_minutes = int(os.getenv("POLL_INTERVAL_MINUTES", "15"))
     scheduler.add_job(_scheduled_analysis_job, "interval", minutes=poll_minutes)
