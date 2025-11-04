@@ -43,7 +43,6 @@ from models.a2a import (
     TaskResult,
 )
 from utils.errors import A2AErrorCode, create_error_response
-from utils.notifier import send_webhook_notification
 from utils.redis_client import redis_store
 
 app = FastAPI(title="Market Intelligence A2A", version="1.0.0", docs_url="/docs")
@@ -169,10 +168,9 @@ async def _handle_message_send(request_id: str, params: MessageParams) -> JSONRe
     """Handle message/send JSON-RPC method."""
     messages = [params.message]
     config = params.configuration
-
-    if not config.blocking and config.pushNotificationConfig:
-        return await _handle_nonblocking_request(request_id, messages, config)
-
+    
+    # ALWAYS use blocking mode (synchronous response) like the working examples
+    # This avoids webhook issues with Telex.im
     return await _handle_blocking_request(request_id, messages, config)
 
 
@@ -195,30 +193,7 @@ async def _handle_blocking_request(
     """Handle blocking request - return result directly."""
     result = await _process_with_agent(messages, config=config)
     response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
-    return JSONResponse(content=response.model_dump(mode="json"))
-
-
-async def _handle_nonblocking_request(
-    request_id: str,
-    messages: list[A2AMessage],
-    config: MessageConfiguration,
-) -> JSONResponse:
-    """Handle non-blocking request - acknowledge immediately and send result via webhook."""
-    ack = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=None)
-
-    if config.pushNotificationConfig:
-        asyncio.create_task(
-            _process_and_notify(
-                messages=messages,
-                config=config,
-                request_id=request_id,
-                webhook_url=config.pushNotificationConfig.url,
-                webhook_token=config.pushNotificationConfig.token,
-                webhook_auth=config.pushNotificationConfig.authentication,
-            )
-        )
-
-    return JSONResponse(content=ack.model_dump(mode="json"))
+    return JSONResponse(content=response.model_dump())
 
 
 @app.post("/a2a/agent/market")
@@ -288,46 +263,5 @@ async def _process_with_agent(
         task_id=task_id,
         config=processed_config,
     )
-
-
-async def _process_and_notify(
-    messages: list[A2AMessage],
-    config: MessageConfiguration,
-    request_id: str,
-    webhook_url: str,
-    webhook_token: str | None = None,
-    webhook_auth: dict[str, Any] | None = None,
-) -> None:
-    """Process request and deliver the result via webhook callback."""
-    try:
-        result = await _process_with_agent(messages, config=config)
-        response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
-
-        await send_webhook_notification(
-            url=webhook_url,
-            payload=response.model_dump(mode="json"),
-            token=webhook_token,
-            auth=webhook_auth,
-        )
-    except Exception as exc:
-        traceback.print_exc()
-        error_payload = {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "error": {
-                "code": -32603,
-                "message": "Internal error",
-                "data": {"details": str(exc)},
-            },
-        }
-        try:
-            await send_webhook_notification(
-                url=webhook_url,
-                payload=error_payload,
-                token=webhook_token,
-                auth=webhook_auth,
-            )
-        except Exception:
-            traceback.print_exc()
 
 
