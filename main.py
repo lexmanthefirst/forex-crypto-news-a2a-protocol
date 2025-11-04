@@ -266,6 +266,8 @@ async def _process_and_notify(
     if config.pushNotificationConfig and config.pushNotificationConfig.token:
         headers["Authorization"] = f"Bearer {config.pushNotificationConfig.token}"
     
+    print(f"🔄 Starting background processing for task {task_id}")
+    
     try:
         # Process the task
         result = await _process_with_agent(
@@ -275,18 +277,17 @@ async def _process_and_notify(
             config=config
         )
         
-        # Send completion notification via webhook
+        print(f"✅ Task {task_id} completed, sending webhook to {webhook_url}")
+        
+        # Send complete TaskResult as JSON-RPC response
+        # This matches the format Telex expects
         webhook_payload = {
             "jsonrpc": "2.0",
-            "method": "task/update",
-            "params": {
-                "id": task_id,
-                "contextId": context_id,
-                "status": result.status.model_dump(mode='json'),
-                "artifacts": [art.model_dump(mode='json') for art in result.artifacts],
-                "history": [msg.model_dump(mode='json') for msg in result.history]
-            }
+            "id": task_id,  # Use task_id as the JSON-RPC id
+            "result": result.model_dump(mode='json', exclude_none=False)
         }
+        
+        print(f"📤 Webhook payload: {webhook_payload}")
         
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
@@ -294,37 +295,45 @@ async def _process_and_notify(
                 json=webhook_payload,
                 headers=headers
             )
-            print(f"DEBUG: Webhook sent to {webhook_url}, status={response.status_code}")
+            print(f"✅ Webhook sent successfully! Status={response.status_code}")
             if response.status_code >= 400:
-                print(f"WARNING: Webhook failed: {response.text}")
+                print(f"⚠️ Webhook returned error status: {response.text}")
+            else:
+                print(f"✅ Webhook accepted by Telex: {response.text[:200]}")
                 
     except Exception as exc:
-        print(f"ERROR: Failed to process/notify task {task_id}: {exc}")
+        print(f"❌ ERROR: Failed to process/notify task {task_id}: {exc}")
         traceback.print_exc()
         
-        # Send error notification
+        # Send error notification as JSON-RPC response
         try:
+            error_status = TaskStatus(
+                state="failed",
+                message=A2AMessage(
+                    role="agent",
+                    parts=[MessagePart(kind="text", text=f"Task processing failed: {str(exc)}")]
+                )
+            )
+            
+            error_result = TaskResult(
+                id=task_id,
+                contextId=context_id,
+                status=error_status,
+                artifacts=[],
+                history=[]
+            )
+            
             error_payload = {
                 "jsonrpc": "2.0",
-                "method": "task/update",
-                "params": {
-                    "id": task_id,
-                    "contextId": context_id,
-                    "status": {
-                        "state": "failed",
-                        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                        "message": {
-                            "role": "agent",
-                            "parts": [{"kind": "text", "text": f"Task processing failed: {str(exc)}"}]
-                        }
-                    }
-                }
+                "id": task_id,
+                "result": error_result.model_dump(mode='json', exclude_none=False)
             }
             
             async with httpx.AsyncClient(timeout=30.0) as client:
                 await client.post(webhook_url, json=error_payload, headers=headers)
-        except Exception:
-            pass  # Best effort error notification
+                print(f"✅ Error notification sent to webhook")
+        except Exception as notify_exc:
+            print(f"❌ Failed to send error notification: {notify_exc}")
 
 
 @app.post("/a2a/agent/market")
