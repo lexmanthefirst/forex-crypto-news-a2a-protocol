@@ -113,19 +113,11 @@ async def _scheduled_analysis_job() -> None:
 # ===========================
 
 async def _parse_request_body(request: Request) -> dict[str, Any] | JSONResponse:
-    """Parse and log incoming request body."""
-    content_type = request.headers.get("content-type", "")
-    print(f"DEBUG: Content-Type={content_type}")
-    
-    raw_body = await request.body()
-    print(f"DEBUG: Body length={len(raw_body)}, first 200 chars={raw_body[:200]}")
-    
+    """Parse incoming request body."""
     try:
         body = await request.json()
-        print(f"DEBUG: Parsed JSON successfully")
         return body
     except Exception as exc:
-        print(f"DEBUG: JSON parse failed: {exc}")
         error_response = create_error_response(
             request_id=None,
             code=A2AErrorCode.PARSE_ERROR,
@@ -139,10 +131,8 @@ async def _validate_jsonrpc_request(body: dict[str, Any]) -> JSONRPCRequest | JS
     """Validate JSON-RPC request structure."""
     try:
         rpc = JSONRPCRequest(**body)
-        print(f"DEBUG: Valid JSON-RPC request, method={rpc.method}")
         return rpc
     except Exception as exc:
-        print(f"DEBUG: Pydantic validation failed: {exc}")
         request_id = body.get("id") if isinstance(body, dict) else None
         error_response = create_error_response(
             request_id=request_id,
