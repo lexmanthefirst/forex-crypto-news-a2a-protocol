@@ -49,7 +49,7 @@ class JSONRPCRequest(BaseModel):
     params: MessageParams | ExecuteParams
 
 class TaskStatus(BaseModel):
-    state: Literal["accepted", "submitted", "working", "completed", "input-required", "failed"]
+    state: Literal["submitted", "working", "completed", "input-required", "failed", "rejected", "canceled", "unknown", "auth_required"]
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
     message: A2AMessage | None = None
 
@@ -69,7 +69,7 @@ class TaskResult(BaseModel):
 class JSONRPCResponse(BaseModel):
     jsonrpc: Literal["2.0"]
     id: str
-    result: TaskResult | None = None
+    result: TaskResult | A2AMessage | None = None
     error: dict[str, Any] | None = None
 
     def model_dump(self, **kwargs):

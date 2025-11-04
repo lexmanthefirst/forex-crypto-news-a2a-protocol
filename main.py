@@ -166,6 +166,16 @@ def _create_internal_error_response(request_id: str, exc: Exception) -> JSONResp
 # Request Handlers
 # ===========================
 
+def _handle_task_exception(task: asyncio.Task, task_id: str) -> None:
+    """Handle exceptions from background tasks."""
+    try:
+        task.result()
+    except Exception as exc:
+        print(f"❌ UNCAUGHT EXCEPTION in background task {task_id}:")
+        print(f"   Error: {exc}")
+        traceback.print_exc()
+
+
 async def _handle_message_send(request_id: str, params: MessageParams) -> JSONResponse:
     """Handle message/send JSON-RPC method."""
     messages = [params.message]
@@ -209,7 +219,7 @@ async def _handle_nonblocking_request(
     messages: list[A2AMessage],
     config: MessageConfiguration
 ) -> JSONResponse:
-    """Handle non-blocking request - return task immediately, send updates via webhook."""
+    """Handle non-blocking request - return message ACK immediately, send full result via webhook."""
     from uuid import uuid4
     
     # Generate task info
@@ -218,37 +228,37 @@ async def _handle_nonblocking_request(
     
     print(f"🎯 Non-blocking request received, task_id={task_id}")
     
-    # Return immediate response with "accepted" status
-    initial_task = TaskResult(
-        id=task_id,
-        contextId=context_id,
-        status=TaskStatus(
-            state="accepted",
-            message=A2AMessage(
-                role="agent",
-                parts=[MessagePart(kind="text", text="Task received and queued for processing")]
-            )
-        ),
-        artifacts=[],
-        history=[]
+    # Return immediate ACK as a simple message (not TaskResult)
+    # Telex expects a Message for the initial response
+    ack_message = A2AMessage(
+        role="agent",
+        parts=[MessagePart(kind="text", text="✅ Task received and queued for processing. Results will be delivered shortly.")],
+        taskId=task_id
     )
     
     print(f"🚀 Spawning background task for {task_id}")
     
     # Start background processing - DO NOT AWAIT
-    asyncio.create_task(
-        _process_and_notify(
-            task_id=task_id,
-            context_id=context_id,
-            messages=messages,
-            config=config
+    # Wrap in try-except to catch any immediate errors
+    try:
+        task = asyncio.create_task(
+            _process_and_notify(
+                task_id=task_id,
+                context_id=context_id,
+                messages=messages,
+                config=config
+            )
         )
-    )
+        # Add done callback to catch exceptions
+        task.add_done_callback(lambda t: _handle_task_exception(t, task_id))
+    except Exception as exc:
+        print(f"❌ Failed to spawn background task: {exc}")
+        traceback.print_exc()
     
-    print(f"✅ Returning immediate ACK for {task_id}")
+    print(f"✅ Returning immediate Message ACK for {task_id}")
     
-    # Return immediate response
-    response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=initial_task)
+    # Return message as result (not TaskResult)
+    response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=ack_message)
     return JSONResponse(content=response.model_dump(mode='json', exclude_none=False))
 
 
