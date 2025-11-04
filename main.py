@@ -306,16 +306,48 @@ async def _process_and_notify(
         print(f"   - Artifacts: {len(result.artifacts)}")
         print(f"   - History: {len(result.history)}")
         
-        # Send complete TaskResult as JSON-RPC response
+        # Extract the agent's message from the result
+        agent_message = result.status.message
+        if not agent_message:
+            print(f"⚠️ WARNING: No message in result status, creating default")
+            agent_message = A2AMessage(
+                role="agent",
+                parts=[MessagePart(kind="text", text="Analysis complete")],
+                taskId=task_id
+            )
+        
+        # Ensure taskId is set
+        if not agent_message.taskId:
+            agent_message.taskId = task_id
+        
+        # Add artifacts as data parts to the message
+        # Telex expects Message format, so we include artifacts in message parts
+        if result.artifacts:
+            print(f"   - Adding {len(result.artifacts)} artifacts to message")
+            for artifact in result.artifacts:
+                # Add each artifact as a data part
+                agent_message.parts.append(
+                    MessagePart(
+                        kind="data",
+                        data={
+                            "artifactId": artifact.artifactId,
+                            "name": artifact.name,
+                            "content": [part.model_dump(mode='json') for part in artifact.parts]
+                        }
+                    )
+                )
+        
+        # Send the agent message (not TaskResult) via webhook
         webhook_payload = {
             "jsonrpc": "2.0",
             "id": task_id,
-            "result": result.model_dump(mode='json', exclude_none=False)
+            "result": agent_message.model_dump(mode='json', exclude_none=False)
         }
         
         print(f"\n📤 Sending webhook to Telex...")
+        print(f"   Payload type: Message (not TaskResult)")
+        print(f"   Message parts: {len(webhook_payload['result']['parts'])}")
         print(f"   Payload size: {len(str(webhook_payload))} bytes")
-        print(f"   Artifacts in payload: {len(webhook_payload['result']['artifacts'])}")
         
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
@@ -342,30 +374,20 @@ async def _process_and_notify(
         print(f"   Error message: {str(exc)}")
         traceback.print_exc()
         
-        # Send error notification as JSON-RPC response
+        # Send error notification as Message (not TaskResult)
         try:
             print(f"\n📤 Sending error notification to webhook...")
             
-            error_status = TaskStatus(
-                state="failed",
-                message=A2AMessage(
-                    role="agent",
-                    parts=[MessagePart(kind="text", text=f"Task processing failed: {str(exc)}")]
-                )
-            )
-            
-            error_result = TaskResult(
-                id=task_id,
-                contextId=context_id,
-                status=error_status,
-                artifacts=[],
-                history=[]
+            error_message = A2AMessage(
+                role="agent",
+                parts=[MessagePart(kind="text", text=f"❌ Task processing failed: {str(exc)}")],
+                taskId=task_id
             )
             
             error_payload = {
                 "jsonrpc": "2.0",
                 "id": task_id,
-                "result": error_result.model_dump(mode='json', exclude_none=False)
+                "result": error_message.model_dump(mode='json', exclude_none=False)
             }
             
             async with httpx.AsyncClient(timeout=30.0) as client:
