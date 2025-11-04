@@ -6,13 +6,13 @@ of cryptocurrencies and forex pairs using the Agent-to-Agent (A2A) protocol.
 
 Architecture:
 - Request parsing & validation layer
-- Blocking and non-blocking request handling (webhook support for Telex.im)
+- Synchronous request handling (blocking mode)
 - Background scheduled analysis jobs
 - Market intelligence agent integration
 - Redis session storage
 
 Endpoints:
-- POST /a2a/market: Main A2A protocol endpoint
+- POST /a2a/agent/market: Main A2A protocol endpoint
 - GET /health: Health check with dependency status
 """
 from __future__ import annotations
@@ -43,7 +43,6 @@ from models.a2a import (
     TaskResult,
 )
 from utils.errors import A2AErrorCode, create_error_response
-from utils.notifier import send_webhook_notification
 from utils.redis_client import redis_store
 
 app = FastAPI(title="Market Intelligence A2A", version="1.0.0", docs_url="/docs")
@@ -197,30 +196,6 @@ async def _handle_blocking_request(
     return JSONResponse(content=response.model_dump())
 
 
-async def _handle_nonblocking_request(
-    request_id: str,
-    messages: list[A2AMessage],
-    config: MessageConfiguration
-) -> JSONResponse:
-    """Handle non-blocking request - send immediate ACK and process in background."""
-    # Send immediate acknowledgment with null result
-    ack_response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=None)
-    
-    # Process in background and send via webhook
-    if config.pushNotificationConfig:
-        asyncio.create_task(
-            _process_and_notify(
-                messages=messages,
-                config=config,
-                request_id=request_id,  # Pass request_id for JSON-RPC response
-                webhook_url=config.pushNotificationConfig.url,
-                webhook_token=config.pushNotificationConfig.token,
-                webhook_auth=config.pushNotificationConfig.authentication
-            )
-        )
-    
-    return JSONResponse(content=ack_response.model_dump())
-
 @app.post("/a2a/agent/market")
 async def a2a_endpoint(request: Request):
     """Main A2A protocol endpoint for market analysis requests."""
@@ -289,58 +264,4 @@ async def _process_with_agent(
         config=processed_config,
     )
 
-
-async def _process_and_notify(
-    messages: list[A2AMessage],
-    config: MessageConfiguration,
-    request_id: str,
-    webhook_url: str,
-    webhook_token: str | None = None,
-    webhook_auth: dict[str, Any] | None = None,
-) -> None:
-    """Process request in background and send result via webhook.
-    
-    Important: Telex expects full JSON-RPC response with explicit null values.
-    Do NOT use exclude_none - Telex validation requires null fields to be present.
-    """
-    try:
-        # Process the request
-        result = await _process_with_agent(messages, config=config)
-        
-        # Wrap in JSON-RPC response (Telex requires this)
-        response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
-        
-        # Send full JSON-RPC response with explicit nulls (do NOT exclude_none)
-        await send_webhook_notification(
-            url=webhook_url,
-            payload=response.model_dump(mode='json'),
-            token=webhook_token,
-            auth=webhook_auth
-        )
-        print(f"DEBUG: Successfully sent JSON-RPC response to webhook: {webhook_url}")
-    except Exception as exc:
-        print(f"DEBUG: Failed to process and notify: {exc}")
-        traceback.print_exc()
-        
-        # Send error in JSON-RPC format
-        try:
-            error_response = JSONRPCResponse(
-                jsonrpc="2.0",
-                id=request_id,
-                result=None,
-                error={
-                    "code": -32603,
-                    "message": "Internal error",
-                    "data": {"details": str(exc)}
-                }
-            )
-            await send_webhook_notification(
-                url=webhook_url,
-                payload=error_response.model_dump(mode='json'),
-                token=webhook_token,
-                auth=webhook_auth
-            )
-        except Exception:
-            print("DEBUG: Failed to send error notification")
-            traceback.print_exc()
 
