@@ -302,37 +302,43 @@ async def _process_and_notify(
 ) -> None:
     """Process request in background and send result via webhook.
     
-    Important: Telex webhooks expect JUST the TaskResult, not wrapped in JSON-RPC.
-    The initial request/response uses JSON-RPC, but webhook callback sends raw result.
+    Important: Telex expects full JSON-RPC response with explicit null values.
+    Do NOT use exclude_none - Telex validation requires null fields to be present.
     """
     try:
         # Process the request
         result = await _process_with_agent(messages, config=config)
         
-        # Send TaskResult directly to webhook (no JSON-RPC wrapper)
+        # Wrap in JSON-RPC response (Telex requires this)
+        response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
+        
+        # Send full JSON-RPC response with explicit nulls (do NOT exclude_none)
         await send_webhook_notification(
             url=webhook_url,
-            payload=result.model_dump(mode='json', exclude_none=True),
+            payload=response.model_dump(mode='json'),
             token=webhook_token,
             auth=webhook_auth
         )
-        print(f"DEBUG: Successfully sent TaskResult to webhook: {webhook_url}")
+        print(f"DEBUG: Successfully sent JSON-RPC response to webhook: {webhook_url}")
     except Exception as exc:
         print(f"DEBUG: Failed to process and notify: {exc}")
         traceback.print_exc()
         
-        # For errors, send minimal error structure
+        # Send error in JSON-RPC format
         try:
-            error_payload = {
-                "error": {
+            error_response = JSONRPCResponse(
+                jsonrpc="2.0",
+                id=request_id,
+                result=None,
+                error={
                     "code": -32603,
                     "message": "Internal error",
-                    "details": str(exc)
+                    "data": {"details": str(exc)}
                 }
-            }
+            )
             await send_webhook_notification(
                 url=webhook_url,
-                payload=error_payload,
+                payload=error_response.model_dump(mode='json'),
                 token=webhook_token,
                 auth=webhook_auth
             )
