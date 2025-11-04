@@ -62,10 +62,7 @@ async def lifespan(_: FastAPI):
     global market_agent
 
     await redis_store.initialize()
-    market_agent = MarketAgent(
-        notifier_webhook=os.getenv("NOTIFIER_WEBHOOK"),
-        notifier_webhook_token=os.getenv("NOTIFIER_WEBHOOK_TOKEN")
-    )
+    market_agent = MarketAgent()
 
     poll_minutes = int(os.getenv("POLL_INTERVAL_MINUTES", "15"))
     scheduler.add_job(_scheduled_analysis_job, "interval", minutes=poll_minutes)
@@ -305,26 +302,26 @@ async def _process_and_notify(
 ) -> None:
     """Process request in background and send result via webhook.
     
-    Note: Telex webhook expects just the TaskResult, not wrapped in JSON-RPC.
+    Important: Telex webhooks expect JUST the TaskResult, not wrapped in JSON-RPC.
     The initial request/response uses JSON-RPC, but webhook callback sends raw result.
     """
     try:
         # Process the request
         result = await _process_with_agent(messages, config=config)
         
-        # Send TaskResult directly (Telex webhooks don't use JSON-RPC wrapper)
+        # Send TaskResult directly to webhook (no JSON-RPC wrapper)
         await send_webhook_notification(
             url=webhook_url,
             payload=result.model_dump(mode='json', exclude_none=True),
             token=webhook_token,
             auth=webhook_auth
         )
-        print(f"DEBUG: Successfully sent result to webhook: {webhook_url}")
+        print(f"DEBUG: Successfully sent TaskResult to webhook: {webhook_url}")
     except Exception as exc:
         print(f"DEBUG: Failed to process and notify: {exc}")
         traceback.print_exc()
         
-        # For errors, still try to notify (send minimal error info)
+        # For errors, send minimal error structure
         try:
             error_payload = {
                 "error": {
