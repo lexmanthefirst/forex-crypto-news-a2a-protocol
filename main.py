@@ -27,6 +27,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 
@@ -46,7 +47,13 @@ from utils.notifier import send_webhook_notification
 from utils.redis_client import redis_store
 
 app = FastAPI(title="Market Intelligence A2A", version="1.0.0", docs_url="/docs")
-
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 scheduler = AsyncIOScheduler()
 market_agent: MarketAgent | None = None
 
