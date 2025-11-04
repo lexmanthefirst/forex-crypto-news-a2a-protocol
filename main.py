@@ -214,14 +214,16 @@ async def _handle_nonblocking_request(
     
     # Generate task info
     task_id = f"task-{uuid4()}"
-    context_id = messages[0].taskId or f"context-{uuid4()}"
+    context_id = f"context-{uuid4()}"
     
-    # Return immediate response with "submitted" status
+    print(f"🎯 Non-blocking request received, task_id={task_id}")
+    
+    # Return immediate response with "accepted" status
     initial_task = TaskResult(
         id=task_id,
         contextId=context_id,
         status=TaskStatus(
-            state="submitted",
+            state="accepted",
             message=A2AMessage(
                 role="agent",
                 parts=[MessagePart(kind="text", text="Task received and queued for processing")]
@@ -231,7 +233,9 @@ async def _handle_nonblocking_request(
         history=[]
     )
     
-    # Start background processing
+    print(f"🚀 Spawning background task for {task_id}")
+    
+    # Start background processing - DO NOT AWAIT
     asyncio.create_task(
         _process_and_notify(
             task_id=task_id,
@@ -240,6 +244,8 @@ async def _handle_nonblocking_request(
             config=config
         )
     )
+    
+    print(f"✅ Returning immediate ACK for {task_id}")
     
     # Return immediate response
     response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=initial_task)
@@ -255,20 +261,28 @@ async def _process_and_notify(
     """Process task in background and send webhook notifications."""
     import httpx
     
+    print(f"\n{'='*60}")
+    print(f"🔄 BACKGROUND TASK STARTED for {task_id}")
+    print(f"{'='*60}\n")
+    
     webhook_url = config.pushNotificationConfig.url if config.pushNotificationConfig else None
     if not webhook_url:
-        print(f"WARNING: Non-blocking request without webhook URL, task {task_id}")
+        print(f"⚠️ WARNING: Non-blocking request without webhook URL, task {task_id}")
         return
+    
+    print(f"📍 Webhook URL: {webhook_url}")
     
     headers = {"Content-Type": "application/json"}
     
     # Add authentication if provided
     if config.pushNotificationConfig and config.pushNotificationConfig.token:
-        headers["Authorization"] = f"Bearer {config.pushNotificationConfig.token}"
-    
-    print(f"🔄 Starting background processing for task {task_id}")
+        token = config.pushNotificationConfig.token
+        headers["Authorization"] = f"Bearer {token}"
+        print(f"🔐 Auth token added (length: {len(token)})")
     
     try:
+        print(f"⚙️ Starting agent processing for {task_id}...")
+        
         # Process the task
         result = await _process_with_agent(
             messages,
@@ -277,17 +291,21 @@ async def _process_and_notify(
             config=config
         )
         
-        print(f"✅ Task {task_id} completed, sending webhook to {webhook_url}")
+        print(f"\n✅ Task {task_id} completed successfully!")
+        print(f"   - Status: {result.status.state}")
+        print(f"   - Artifacts: {len(result.artifacts)}")
+        print(f"   - History: {len(result.history)}")
         
         # Send complete TaskResult as JSON-RPC response
-        # This matches the format Telex expects
         webhook_payload = {
             "jsonrpc": "2.0",
-            "id": task_id,  # Use task_id as the JSON-RPC id
+            "id": task_id,
             "result": result.model_dump(mode='json', exclude_none=False)
         }
         
-        print(f"📤 Webhook payload: {webhook_payload}")
+        print(f"\n📤 Sending webhook to Telex...")
+        print(f"   Payload size: {len(str(webhook_payload))} bytes")
+        print(f"   Artifacts in payload: {len(webhook_payload['result']['artifacts'])}")
         
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
@@ -295,18 +313,29 @@ async def _process_and_notify(
                 json=webhook_payload,
                 headers=headers
             )
-            print(f"✅ Webhook sent successfully! Status={response.status_code}")
+            
+            print(f"\n✅ WEBHOOK RESPONSE RECEIVED!")
+            print(f"   Status Code: {response.status_code}")
+            print(f"   Response: {response.text[:500]}")
+            
             if response.status_code >= 400:
-                print(f"⚠️ Webhook returned error status: {response.text}")
+                print(f"\n⚠️ WARNING: Webhook returned error status")
+                print(f"   Full response: {response.text}")
+            elif response.status_code == 202:
+                print(f"\n✅ Webhook ACCEPTED (202) by Telex!")
             else:
-                print(f"✅ Webhook accepted by Telex: {response.text[:200]}")
+                print(f"\n✅ Webhook delivered successfully!")
                 
     except Exception as exc:
-        print(f"❌ ERROR: Failed to process/notify task {task_id}: {exc}")
+        print(f"\n❌ ERROR in background task {task_id}:")
+        print(f"   Error type: {type(exc).__name__}")
+        print(f"   Error message: {str(exc)}")
         traceback.print_exc()
         
         # Send error notification as JSON-RPC response
         try:
+            print(f"\n📤 Sending error notification to webhook...")
+            
             error_status = TaskStatus(
                 state="failed",
                 message=A2AMessage(
@@ -330,10 +359,14 @@ async def _process_and_notify(
             }
             
             async with httpx.AsyncClient(timeout=30.0) as client:
-                await client.post(webhook_url, json=error_payload, headers=headers)
-                print(f"✅ Error notification sent to webhook")
+                error_response = await client.post(webhook_url, json=error_payload, headers=headers)
+                print(f"✅ Error notification sent, status={error_response.status_code}")
         except Exception as notify_exc:
             print(f"❌ Failed to send error notification: {notify_exc}")
+    
+    print(f"\n{'='*60}")
+    print(f"🏁 BACKGROUND TASK FINISHED for {task_id}")
+    print(f"{'='*60}\n")
 
 
 @app.post("/a2a/agent/market")
