@@ -15,7 +15,7 @@
         "position": [816, -112],
         "type": "a2a/generic-a2a-node",
         "typeVersion": 1,
-        "url": "https://forex-crypto-news-a2a-protocol-production.up.railway.app/a2a/market"
+        "url": "https://forex-crypto-news-a2a-protocol-production.up.railway.app/a2a/agent/market"
       }
     ],
     "pinData": {},
