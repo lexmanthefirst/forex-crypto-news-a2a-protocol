@@ -456,7 +456,28 @@ async def health_check():
         ok["dependencies"]["redis"] = "ok"
     except Exception as exc:
         ok["dependencies"]["redis"] = f"error: {exc}"
+    ok["background_tasks_active"] = len(background_tasks)
     return ok
+
+@app.get("/test-background")
+async def test_background():
+    """Test endpoint to verify background tasks work."""
+    import sys
+    
+    async def test_task():
+        sys.stderr.write("🧪 TEST: Background task started\n")
+        sys.stderr.flush()
+        print("🧪 TEST: Background task started")
+        await asyncio.sleep(2)
+        sys.stderr.write("🧪 TEST: Background task finished\n")
+        sys.stderr.flush()
+        print("🧪 TEST: Background task finished")
+    
+    task = asyncio.create_task(test_task())
+    background_tasks.add(task)
+    task.add_done_callback(lambda t: background_tasks.discard(t))
+    
+    return {"message": "Test background task spawned", "active_tasks": len(background_tasks)}
 
 if __name__ == "__main__":
     import uvicorn
