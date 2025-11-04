@@ -58,9 +58,6 @@ app.add_middleware(
 scheduler = AsyncIOScheduler()
 market_agent: MarketAgent | None = None
 
-# Track background tasks to prevent garbage collection
-background_tasks: set[asyncio.Task] = set()
-
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     global market_agent
@@ -159,28 +156,21 @@ def _create_internal_error_response(request_id: str, exc: Exception) -> JSONResp
 # Request Handlers
 # ===========================
 
-def _handle_task_exception(task: asyncio.Task, task_id: str) -> None:
-    """Handle exceptions from background tasks."""
-    try:
-        task.result()
-    except Exception as exc:
-        print(f"❌ UNCAUGHT EXCEPTION in background task {task_id}:")
-        print(f"   Error: {exc}")
-        traceback.print_exc()
-
-
 async def _handle_message_send(request_id: str, params: MessageParams) -> JSONResponse:
     """Handle message/send JSON-RPC method."""
     messages = [params.message]
     config = params.configuration
     
-    # Respect the blocking preference from client
-    if config.blocking:
-        # Client wants synchronous response
-        return await _handle_blocking_request(request_id, messages, config)
-    else:
-        # Client wants async with webhooks
-        return await _handle_nonblocking_request(request_id, messages, config)
+    # Always process synchronously and return complete result immediately
+    result = await _process_with_agent(messages, config=config)
+    
+    # If webhook is configured, send notification in background (optional)
+    if not config.blocking and config.pushNotificationConfig:
+        asyncio.create_task(_send_webhook_notification(result, config))
+    
+    # Return complete result immediately
+    response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
+    return JSONResponse(content=response.model_dump(mode='json', exclude_none=False))
 
 
 async def _handle_execute(request_id: str, params: ExecuteParams) -> JSONResponse:
@@ -191,224 +181,33 @@ async def _handle_execute(request_id: str, params: ExecuteParams) -> JSONRespons
         task_id=params.taskId,
     )
     response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
-    # Explicitly include all fields, exclude None values except for result/error
     return JSONResponse(content=response.model_dump(mode='json', exclude_none=False))
 
 
-async def _handle_blocking_request(
-    request_id: str,
-    messages: list[A2AMessage],
-    config: MessageConfiguration
-) -> JSONResponse:
-    """Handle blocking request - return result directly."""
-    result = await _process_with_agent(messages, config=config)
-    response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
-    # Explicitly include all fields with proper JSON serialization
-    return JSONResponse(content=response.model_dump(mode='json', exclude_none=False))
-
-
-async def _handle_nonblocking_request(
-    request_id: str,
-    messages: list[A2AMessage],
-    config: MessageConfiguration
-) -> JSONResponse:
-    """Handle non-blocking request - return message ACK immediately, send full result via webhook."""
-    from uuid import uuid4
-    
-    # Generate task info
-    task_id = f"task-{uuid4()}"
-    context_id = f"context-{uuid4()}"
-    
-    print(f"🎯 Non-blocking request received, task_id={task_id}")
-    
-    # Return immediate ACK as a simple message (not TaskResult)
-    # Telex expects a Message for the initial response
-    ack_message = A2AMessage(
-        role="agent",
-        parts=[MessagePart(kind="text", text="✅ Task received and queued for processing. Results will be delivered shortly.")],
-        taskId=task_id
-    )
-    
-    print(f"🚀 Spawning background task for {task_id}")
-    
-    # Start background processing - DO NOT AWAIT
-    # Wrap in try-except to catch any immediate errors
-    try:
-        task = asyncio.create_task(
-            _process_and_notify(
-                task_id=task_id,
-                context_id=context_id,
-                messages=messages,
-                config=config
-            )
-        )
-        
-        # Add to global set to prevent garbage collection
-        background_tasks.add(task)
-        
-        # Add done callback to catch exceptions and cleanup
-        def cleanup_task(t: asyncio.Task) -> None:
-            background_tasks.discard(t)
-            _handle_task_exception(t, task_id)
-        
-        task.add_done_callback(cleanup_task)
-        
-        print(f"✅ Background task created and tracked (total: {len(background_tasks)})")
-    except Exception as exc:
-        print(f"❌ Failed to spawn background task: {exc}")
-        traceback.print_exc()
-    
-    print(f"✅ Returning immediate Message ACK for {task_id}")
-    
-    # Return message as result (not TaskResult)
-    response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=ack_message)
-    return JSONResponse(content=response.model_dump(mode='json', exclude_none=False))
-
-
-async def _process_and_notify(
-    task_id: str,
-    context_id: str,
-    messages: list[A2AMessage],
-    config: MessageConfiguration
-) -> None:
-    """Process task in background and send webhook notifications."""
+async def _send_webhook_notification(result: TaskResult, config: MessageConfiguration) -> None:
+    """Send webhook notification in background (fire-and-forget)."""
     import httpx
-    import sys
     
-    # Immediate logging to stdout/stderr
-    sys.stderr.write(f"\n{'='*60}\n")
-    sys.stderr.write(f"🔄 BACKGROUND TASK STARTED for {task_id}\n")
-    sys.stderr.write(f"{'='*60}\n\n")
-    sys.stderr.flush()
-    
-    print(f"\n{'='*60}")
-    print(f"🔄 BACKGROUND TASK STARTED for {task_id}")
-    print(f"{'='*60}\n")
-    
-    webhook_url = config.pushNotificationConfig.url if config.pushNotificationConfig else None
-    if not webhook_url:
-        print(f"⚠️ WARNING: Non-blocking request without webhook URL, task {task_id}")
+    if not config.pushNotificationConfig or not config.pushNotificationConfig.url:
         return
     
-    print(f"📍 Webhook URL: {webhook_url}")
-    
+    webhook_url = config.pushNotificationConfig.url
     headers = {"Content-Type": "application/json"}
     
-    # Add authentication if provided
-    if config.pushNotificationConfig and config.pushNotificationConfig.token:
-        token = config.pushNotificationConfig.token
-        headers["Authorization"] = f"Bearer {token}"
-        print(f"🔐 Auth token added (length: {len(token)})")
+    if config.pushNotificationConfig.token:
+        headers["Authorization"] = f"Bearer {config.pushNotificationConfig.token}"
     
     try:
-        print(f"⚙️ Starting agent processing for {task_id}...")
-        
-        # Process the task
-        result = await _process_with_agent(
-            messages,
-            context_id=context_id,
-            task_id=task_id,
-            config=config
-        )
-        
-        print(f"\n✅ Task {task_id} completed successfully!")
-        print(f"   - Status: {result.status.state}")
-        print(f"   - Artifacts: {len(result.artifacts)}")
-        print(f"   - History: {len(result.history)}")
-        
-        # Extract the agent's message from the result
-        agent_message = result.status.message
-        if not agent_message:
-            print(f"⚠️ WARNING: No message in result status, creating default")
-            agent_message = A2AMessage(
-                role="agent",
-                parts=[MessagePart(kind="text", text="Analysis complete")],
-                taskId=task_id
-            )
-        
-        # Ensure taskId is set
-        if not agent_message.taskId:
-            agent_message.taskId = task_id
-        
-        # Add artifacts as data parts to the message
-        # Telex expects Message format, so we include artifacts in message parts
-        if result.artifacts:
-            print(f"   - Adding {len(result.artifacts)} artifacts to message")
-            for artifact in result.artifacts:
-                # Add each artifact as a data part
-                agent_message.parts.append(
-                    MessagePart(
-                        kind="data",
-                        data={
-                            "artifactId": artifact.artifactId,
-                            "name": artifact.name,
-                            "content": [part.model_dump(mode='json') for part in artifact.parts]
-                        }
-                    )
-                )
-        
-        # Send the agent message (not TaskResult) via webhook
         webhook_payload = {
             "jsonrpc": "2.0",
-            "id": task_id,
-            "result": agent_message.model_dump(mode='json', exclude_none=False)
+            "id": result.id,
+            "result": result.model_dump(mode='json', exclude_none=False)
         }
         
-        print(f"\n📤 Sending webhook to Telex...")
-        print(f"   Payload type: Message (not TaskResult)")
-        print(f"   Message parts: {len(webhook_payload['result']['parts'])}")
-        print(f"   Payload size: {len(str(webhook_payload))} bytes")
-        
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                webhook_url,
-                json=webhook_payload,
-                headers=headers
-            )
-            
-            print(f"\n✅ WEBHOOK RESPONSE RECEIVED!")
-            print(f"   Status Code: {response.status_code}")
-            print(f"   Response: {response.text[:500]}")
-            
-            if response.status_code >= 400:
-                print(f"\n⚠️ WARNING: Webhook returned error status")
-                print(f"   Full response: {response.text}")
-            elif response.status_code == 202:
-                print(f"\n✅ Webhook ACCEPTED (202) by Telex!")
-            else:
-                print(f"\n✅ Webhook delivered successfully!")
-                
-    except Exception as exc:
-        print(f"\n❌ ERROR in background task {task_id}:")
-        print(f"   Error type: {type(exc).__name__}")
-        print(f"   Error message: {str(exc)}")
-        traceback.print_exc()
-        
-        # Send error notification as Message (not TaskResult)
-        try:
-            print(f"\n📤 Sending error notification to webhook...")
-            
-            error_message = A2AMessage(
-                role="agent",
-                parts=[MessagePart(kind="text", text=f"❌ Task processing failed: {str(exc)}")],
-                taskId=task_id
-            )
-            
-            error_payload = {
-                "jsonrpc": "2.0",
-                "id": task_id,
-                "result": error_message.model_dump(mode='json', exclude_none=False)
-            }
-            
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                error_response = await client.post(webhook_url, json=error_payload, headers=headers)
-                print(f"✅ Error notification sent, status={error_response.status_code}")
-        except Exception as notify_exc:
-            print(f"❌ Failed to send error notification: {notify_exc}")
-    
-    print(f"\n{'='*60}")
-    print(f"🏁 BACKGROUND TASK FINISHED for {task_id}")
-    print(f"{'='*60}\n")
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.post(webhook_url, json=webhook_payload, headers=headers)
+    except Exception:
+        pass  # Silent fail for optional notification
 
 
 @app.post("/a2a/agent/market")
@@ -439,6 +238,7 @@ async def a2a_endpoint(request: Request):
 
 @app.get("/health")
 async def health_check():
+    """Health check endpoint."""
     ok: dict[str, Any] = {"status": "healthy", "dependencies": {}}
     try:
         redis = redis_store.client
@@ -446,28 +246,8 @@ async def health_check():
         ok["dependencies"]["redis"] = "ok"
     except Exception as exc:
         ok["dependencies"]["redis"] = f"error: {exc}"
-    ok["background_tasks_active"] = len(background_tasks)
     return ok
 
-@app.get("/test-background")
-async def test_background():
-    """Test endpoint to verify background tasks work."""
-    import sys
-    
-    async def test_task():
-        sys.stderr.write("🧪 TEST: Background task started\n")
-        sys.stderr.flush()
-        print("🧪 TEST: Background task started")
-        await asyncio.sleep(2)
-        sys.stderr.write("🧪 TEST: Background task finished\n")
-        sys.stderr.flush()
-        print("🧪 TEST: Background task finished")
-    
-    task = asyncio.create_task(test_task())
-    background_tasks.add(task)
-    task.add_done_callback(lambda t: background_tasks.discard(t))
-    
-    return {"message": "Test background task spawned", "active_tasks": len(background_tasks)}
 
 if __name__ == "__main__":
     import uvicorn
