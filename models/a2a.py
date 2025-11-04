@@ -49,7 +49,7 @@ class JSONRPCRequest(BaseModel):
     params: MessageParams | ExecuteParams
 
 class TaskStatus(BaseModel):
-    state: Literal["working", "completed", "input-required", "failed"]
+    state: Literal["submitted", "working", "completed", "input-required", "failed"]
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
     message: A2AMessage | None = None
 
