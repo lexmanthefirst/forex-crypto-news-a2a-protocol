@@ -66,16 +66,14 @@ async def _search_coingecko_id(symbol: str) -> str | None:
         for coin in coins:
             if coin.get("symbol", "").upper() == symbol.upper():
                 coin_id = coin.get("id")
-                print(f"DEBUG: Found CoinGecko ID '{coin_id}' for symbol '{symbol}'")
                 return coin_id
         
         if coins:
             coin_id = coins[0].get("id")
-            print(f"DEBUG: Using first result '{coin_id}' for symbol '{symbol}'")
             return coin_id
             
-    except httpx.HTTPError as exc:
-        print(f"DEBUG: CoinGecko search failed for '{symbol}': {exc}")
+    except httpx.HTTPError:
+        pass
     
     return symbol.lower()
 

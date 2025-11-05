@@ -23,6 +23,7 @@ import traceback
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Awaitable, cast
+from uuid import uuid4
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
@@ -164,10 +165,6 @@ async def _handle_message_send(request_id: str, params: MessageParams) -> JSONRe
     # Always process synchronously and return complete result immediately
     result = await _process_with_agent(messages, config=config)
     
-    # If webhook is configured, send notification in background (optional)
-    if not config.blocking and config.pushNotificationConfig:
-        asyncio.create_task(_send_webhook_notification(result, config))
-    
     # Return complete result immediately
     response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
     return JSONResponse(content=response.model_dump(mode='json', exclude_none=False))
@@ -182,32 +179,6 @@ async def _handle_execute(request_id: str, params: ExecuteParams) -> JSONRespons
     )
     response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
     return JSONResponse(content=response.model_dump(mode='json', exclude_none=False))
-
-
-async def _send_webhook_notification(result: TaskResult, config: MessageConfiguration) -> None:
-    """Send webhook notification in background (fire-and-forget)."""
-    import httpx
-    
-    if not config.pushNotificationConfig or not config.pushNotificationConfig.url:
-        return
-    
-    webhook_url = config.pushNotificationConfig.url
-    headers = {"Content-Type": "application/json"}
-    
-    if config.pushNotificationConfig.token:
-        headers["Authorization"] = f"Bearer {config.pushNotificationConfig.token}"
-    
-    try:
-        webhook_payload = {
-            "jsonrpc": "2.0",
-            "id": result.id,
-            "result": result.model_dump(mode='json', exclude_none=False)
-        }
-        
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            await client.post(webhook_url, json=webhook_payload, headers=headers)
-    except Exception:
-        pass  # Silent fail for optional notification
 
 
 @app.post("/a2a/agent/market")
@@ -235,6 +206,107 @@ async def a2a_endpoint(request: Request):
             
     except Exception as exc:
         return _create_internal_error_response(rpc.id, exc)
+
+
+@app.post("/webhook/telex")
+async def telex_webhook(request: Request):
+    """
+    Webhook endpoint for Telex integration.
+    
+    Telex will call this endpoint with their webhook data format:
+    {
+        "event_name": "Event Name",
+        "message": "Message Content",
+        "status": "Status",
+        "username": "Username"
+    }
+    
+    We process it as an A2A request and return the result.
+    """
+    try:
+        # Parse the webhook payload from Telex
+        body = await request.json()
+        print(f"📥 Received Telex webhook: {body}")
+        
+        # Extract the message content from Telex format
+        message_text = body.get("message", "")
+        event_name = body.get("event_name", "")
+        username = body.get("username", "unknown")
+        
+        if not message_text:
+            return JSONResponse(
+                status_code=400,
+                content={"status": "error", "message": "No message content provided"}
+            )
+        
+        # Convert to A2A message format
+        a2a_message = A2AMessage(
+            role="user",
+            parts=[MessagePart(kind="text", text=message_text)],
+            metadata={
+                "event_name": event_name,
+                "username": username,
+                "source": "telex_webhook"
+            }
+        )
+        
+        # Process with the market agent
+        if market_agent is None:
+            raise RuntimeError("MarketAgent is not initialized")
+        
+        result = await market_agent.process_messages(
+            messages=[a2a_message],
+            context_id=f"telex-{username}",
+            task_id=str(uuid4())
+        )
+        
+        # Convert TaskResult back to Telex webhook response format
+        # Extract the analysis message from artifacts
+        analysis_text = "No analysis available"
+        if result.artifacts:
+            for artifact in result.artifacts:
+                if artifact.name == "analysis":
+                    for part in artifact.parts:
+                        if part.kind == "text" and part.text:
+                            analysis_text = part.text
+                            break
+        
+        # Return response in Telex webhook format
+        response_data = {
+            "status": "success",
+            "status_code": 200,
+            "message": "Data processed successfully",
+            "data": {
+                "event_name": event_name,
+                "message": analysis_text,
+                "status": result.status.state,
+                "username": username,
+                "task_id": result.id,
+                "artifacts": [
+                    {
+                        "id": artifact.artifactId,
+                        "name": artifact.name,
+                        "content": [part.model_dump(exclude_none=True) for part in artifact.parts]
+                    }
+                    for artifact in result.artifacts
+                ]
+            }
+        }
+        
+        print(f"✅ Telex webhook processed successfully: task_id={result.id}")
+        return JSONResponse(status_code=200, content=response_data)
+        
+    except Exception as exc:
+        tb = traceback.format_exc()
+        print(f"❌ Telex webhook error: {exc}\n{tb}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "status_code": 500,
+                "message": f"Internal server error: {str(exc)}"
+            }
+        )
 
 @app.get("/health")
 async def health_check():

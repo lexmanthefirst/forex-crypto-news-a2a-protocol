@@ -87,9 +87,8 @@ def _default_analysis(news_summary: str) -> dict[str, Any]:
 
 def _generate_with_gemini(prompt: str, timeout: int) -> dict[str, Any]:
     if not GEMINI_API_KEY or genai is None:
-        print(f"DEBUG: Gemini disabled - API_KEY present: {bool(GEMINI_API_KEY)}, genai loaded: {genai is not None}")
         return {}
-
+    
     try:
         print(f"DEBUG: Attempting Gemini call with model={GEMINI_MODEL}")
         client = genai.Client(api_key=GEMINI_API_KEY)
