@@ -126,20 +126,41 @@ async def _parse_request_body(request: Request) -> dict[str, Any] | JSONResponse
         return JSONResponse(status_code=400, content=error_response)
 
 
-async def _validate_jsonrpc_request(body: dict[str, Any]) -> JSONRPCRequest | JSONResponse:
-    """Validate JSON-RPC request structure."""
+async def _validate_jsonrpc_request(body: dict[str, Any], lenient: bool = False) -> JSONRPCRequest | JSONResponse:
+    """
+    Validate JSON-RPC request structure.
+    
+    Args:
+        body: Request body
+        lenient: If True, returns error as JSON-RPC response (HTTP 200) instead of HTTP 400
+    """
     try:
         rpc = JSONRPCRequest(**body)
         return rpc
     except Exception as exc:
         request_id = body.get("id") if isinstance(body, dict) else None
-        error_response = create_error_response(
-            request_id=request_id,
-            code=A2AErrorCode.INVALID_REQUEST,
-            message="Invalid Request",
-            data={"details": str(exc)}
-        )
-        return JSONResponse(status_code=400, content=error_response)
+        
+        if lenient:
+            # Return error as successful JSON-RPC response (HTTP 200)
+            error_payload = {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {
+                    "code": A2AErrorCode.INVALID_REQUEST,
+                    "message": "Invalid Request",
+                    "data": {"details": str(exc)}
+                }
+            }
+            return JSONResponse(status_code=200, content=error_payload)
+        else:
+            # Return HTTP error
+            error_response = create_error_response(
+                request_id=request_id,
+                code=A2AErrorCode.INVALID_REQUEST,
+                message="Invalid Request",
+                data={"details": str(exc)}
+            )
+            return JSONResponse(status_code=400, content=error_response)
 
 
 def _create_internal_error_response(request_id: str, exc: Exception) -> JSONResponse:
@@ -287,9 +308,10 @@ async def a2a_endpoint(request: Request):
     if isinstance(body, JSONResponse):
         return body  # Error response
     
-    rpc = await _validate_jsonrpc_request(body)
+    # Use lenient validation (returns HTTP 200 even for errors)
+    rpc = await _validate_jsonrpc_request(body, lenient=True)
     if isinstance(rpc, JSONResponse):
-        return rpc  # Error response
+        return rpc  # Error response (but HTTP 200)
     
     # Process the request
     try:
@@ -303,7 +325,17 @@ async def a2a_endpoint(request: Request):
             raise ValueError("Unsupported params payload")
             
     except Exception as exc:
-        return _create_internal_error_response(rpc.id, exc)
+        # Return error as JSON-RPC error response (HTTP 200)
+        error_payload = {
+            "jsonrpc": "2.0",
+            "id": rpc.id,
+            "error": {
+                "code": A2AErrorCode.INTERNAL_ERROR,
+                "message": "Internal error",
+                "data": {"details": str(exc), "trace": traceback.format_exc()}
+            }
+        }
+        return JSONResponse(status_code=200, content=error_payload)
 
 @app.get("/health")
 async def health_check():
@@ -316,6 +348,81 @@ async def health_check():
     except Exception as exc:
         ok["dependencies"]["redis"] = f"error: {exc}"
     return ok
+
+
+@app.get("/agent.json")
+@app.get("/.well-known/agent.json")
+async def agent_manifest():
+    """Agent manifest/discovery endpoint for A2A protocol.
+    
+    Returns agent metadata, capabilities, and endpoint information
+    for agent discovery and integration.
+    """
+    return {
+        "name": "Market Intelligence Agent",
+        "version": "1.0.0",
+        "publisher": "Market Intelligence Team",
+        "description": "Real-time market analysis agent for cryptocurrencies and forex pairs. Provides price tracking, technical analysis, news aggregation, and AI-powered market insights.",
+        "capabilities": [
+            "Real-time cryptocurrency price tracking (CoinGecko)",
+            "Forex pair analysis and exchange rates",
+            "Technical indicators (RSI, MACD, Bollinger Bands)",
+            "News aggregation from multiple sources",
+            "AI-powered market analysis and insights",
+            "Redis caching for performance (60s prices, 300s news)",
+            "Supports both blocking and non-blocking modes"
+        ],
+        "endpoints": [
+            {
+                "method": "POST",
+                "path": "/a2a/agent/market",
+                "description": "Main A2A protocol endpoint for market analysis",
+                "protocol": "JSON-RPC 2.0",
+                "methods": [
+                    "message/send",
+                    "execute"
+                ]
+            },
+            {
+                "method": "GET",
+                "path": "/health",
+                "description": "Health check endpoint"
+            },
+            {
+                "method": "GET",
+                "path": "/agent.json",
+                "description": "Agent manifest (this endpoint)"
+            }
+        ],
+        "features": {
+            "supported_assets": [
+                "Cryptocurrencies (BTC, ETH, SOL, etc.)",
+                "Forex pairs (EUR/USD, GBP/USD, etc.)"
+            ],
+            "analysis_types": [
+                "Price tracking",
+                "Technical analysis",
+                "News aggregation",
+                "Market sentiment",
+                "AI insights"
+            ],
+            "caching": {
+                "price_data": "60 seconds",
+                "news_data": "300 seconds",
+                "forex_rates": "60 seconds"
+            }
+        },
+        "protocol": {
+            "version": "A2A/1.0",
+            "jsonrpc": "2.0",
+            "blocking_mode": True,
+            "non_blocking_mode": True,
+            "webhook_support": True
+        },
+        "contact": {
+            "support": "github.com/lexmanthefirst/forex-crypto-news-a2a-protocol"
+        }
+    }
 
 
 if __name__ == "__main__":
