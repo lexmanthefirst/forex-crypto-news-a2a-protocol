@@ -7,6 +7,8 @@ from typing import Any, Iterable
 
 import httpx
 
+from utils.caching import redis_cache
+
 COINGECKO_BASE = os.getenv("COINGECKO_BASE", "https://api.coingecko.com/api/v3")
 ALPHAVANTAGE_BASE = os.getenv("ALPHAVANTAGE_BASE", "https://www.alphavantage.co/query")
 CRYPTOPANIC_BASE = os.getenv("CRYPTOPANIC_BASE", "https://cryptopanic.com/api/v1")
@@ -99,6 +101,7 @@ async def _search_coingecko_id(symbol: str) -> str | None:
     return symbol.lower()
 
 
+@redis_cache(ttl=60)  # Cache crypto prices for 60 seconds
 async def fetch_crypto_prices(symbols: Iterable[str]) -> dict[str, float]:
     symbol_list = [symbol.upper() for symbol in symbols]
     if not symbol_list:
@@ -147,6 +150,7 @@ async def fetch_crypto_prices(symbols: Iterable[str]) -> dict[str, float]:
 fetch_Crypto_prices = fetch_crypto_prices
 
 
+@redis_cache(ttl=60)  # Cache forex rates for 60 seconds
 async def fetch_forex_rate(pair: str) -> dict[str, Any]:
     """Return the latest forex rate for a pair formatted like "EUR/USD"."""
 
@@ -186,6 +190,7 @@ async def fetch_forex_rate(pair: str) -> dict[str, Any]:
 fetch_forect_rate = fetch_forex_rate
 
 
+@redis_cache(ttl=300)  # Cache crypto news for 5 minutes
 async def fetch_crypto_news(limit: int = 3) -> list[dict[str, Any]]:
     """Fetch important crypto news from Cryptopanic."""
 
@@ -222,6 +227,7 @@ async def fetch_crypto_news(limit: int = 3) -> list[dict[str, Any]]:
     return articles
 
 
+@redis_cache(ttl=300)  # Cache forex news for 5 minutes
 async def fetch_forex_news(limit: int = 5) -> list[dict[str, Any]]:
     """Fetch forex-related articles from NewsAPI."""
 
@@ -269,6 +275,7 @@ def dedupe_news(*news_lists: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     return deduped
 
 
+@redis_cache(ttl=300)  # Cache combined news for 5 minutes
 async def fetch_combined_news(limit: int = 10) -> list[dict[str, Any]]:
     """Return a merged crypto and forex news feed capped to ``limit`` items."""
 
