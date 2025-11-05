@@ -174,21 +174,16 @@ class MarketAgent:
             symbol=symbol
         )
         
-        # Create agent message with both text and data parts for history
+        # Create agent message with text part only (for Telex display compatibility)
         agent_msg = A2AMessage(
             role="agent", 
             parts=[
                 MessagePart(kind="text", text=agent_text),
-                MessagePart(kind="data", data={
-                    "analysis": analysis,
-                    "price_snapshot": price_snapshot,
-                    "technical_data": technical_data,
-                    "news": relevant[:3]
-                })
             ], 
             taskId=task_id
         )
 
+        # Store structured data in artifacts (not in message parts)
         artifacts: list[Artifact] = [
             Artifact(name="analysis", parts=[MessagePart(kind="data", data=analysis)]),
         ]
