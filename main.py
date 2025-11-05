@@ -208,6 +208,14 @@ async def _process_and_push_webhook(
             "result": result.model_dump(mode='json', exclude_none=False)
         }
         
+        # DEBUG: Log webhook details
+        print(f"📤 Webhook URL: {push_url}")
+        print(f"📤 Request ID: {request_id}")
+        print(f"📤 Task ID: {task_id}")
+        print(f"📤 Context ID: {context_id}")
+        print(f"📤 Payload keys: {list(webhook_payload.keys())}")
+        print(f"📤 Result keys: {list(webhook_payload['result'].keys())}")
+        
         # Push to Telex webhook
         headers = {
             "Content-Type": "application/json",
@@ -220,9 +228,20 @@ async def _process_and_push_webhook(
                 json=webhook_payload,
                 headers=headers
             )
-            response.raise_for_status()
-            print(f"✅ Webhook push successful: {response.status_code}")
             
+            # DEBUG: Log response details
+            print(f"📥 Response status: {response.status_code}")
+            print(f"📥 Response headers: {dict(response.headers)}")
+            print(f"📥 Response body: {response.text[:500]}")
+            
+            response.raise_for_status()
+            print(f"✅ Webhook push successful!")
+            
+    except httpx.HTTPStatusError as e:
+        print(f"❌ Webhook HTTP error: {e.response.status_code}")
+        print(f"❌ Response body: {e.response.text}")
+        print(f"❌ Request was: {e.request.method} {e.request.url}")
+        traceback.print_exc()
     except Exception as e:
         print(f"❌ Webhook push failed: {e}")
         traceback.print_exc()
