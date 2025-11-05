@@ -20,10 +20,12 @@ from __future__ import annotations
 import asyncio
 import os
 import traceback
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Awaitable, cast
 
+import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
@@ -156,15 +158,112 @@ def _create_internal_error_response(request_id: str, exc: Exception) -> JSONResp
 # Request Handlers
 # ===========================
 
+async def _process_and_push_webhook(
+    messages: list[A2AMessage],
+    task_id: str,
+    context_id: str,
+    request_id: str,
+    config: MessageConfiguration | None,
+    push_url: str,
+    push_token: str,
+) -> None:
+    """Process messages in background and push result to Telex webhook.
+    
+    This implements the non-blocking A2A pattern from the PRRover example.
+    """
+    try:
+        # Process with agent
+        result = await _process_with_agent(
+            messages,
+            context_id=context_id,
+            task_id=task_id,
+            config=config.model_dump(mode='json') if config else None,
+        )
+        
+        # Build webhook payload (JSON-RPC response format - NOT request format!)
+        webhook_payload = {
+            "jsonrpc": "2.0",
+            "id": request_id,  # Use original request ID
+            "result": result.model_dump(mode='json', exclude_none=False)
+        }
+        
+        # Push to Telex webhook
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {push_token}"
+        }
+        
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                push_url,
+                json=webhook_payload,
+                headers=headers
+            )
+            response.raise_for_status()
+            print(f"✅ Webhook push successful: {response.status_code}")
+            
+    except Exception as e:
+        print(f"❌ Webhook push failed: {e}")
+        traceback.print_exc()
+
+
 async def _handle_message_send(request_id: str, params: MessageParams) -> JSONResponse:
-    """Handle message/send JSON-RPC method."""
+    """Handle message/send JSON-RPC method.
+    
+    Supports both blocking and non-blocking modes:
+    - Blocking: Process and return completed result immediately
+    - Non-blocking: Return 'accepted' status, process in background, push to webhook
+    """
     messages = [params.message]
     config = params.configuration
     
-    # Always process synchronously and return complete result immediately
-    result = await _process_with_agent(messages, config=config)
+    # Check if non-blocking mode is requested
+    is_blocking = True
+    push_config = None
     
-    # Return complete result immediately
+    if config:
+        # Check blocking flag (default to True if not specified)
+        is_blocking = config.blocking if hasattr(config, 'blocking') and config.blocking is not None else True
+        push_config = config.pushNotificationConfig if hasattr(config, 'pushNotificationConfig') else None
+    
+    # Non-blocking mode: return accepted, process in background
+    if not is_blocking and push_config and push_config.url and push_config.token:
+        task_id = str(uuid.uuid4())
+        context_id = str(uuid.uuid4())
+        
+        # Return accepted status immediately
+        accepted_result = TaskResult(
+            id=task_id,
+            contextId=context_id,
+            status=TaskStatus(
+                state="submitted",
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                message=A2AMessage(
+                    role="agent",
+                    parts=[MessagePart(kind="text", text="🔄 Analyzing your request! Results coming shortly...")],
+                ),
+            ),
+            artifacts=[],
+            history=messages,
+            kind="task"
+        )
+        
+        # Start background processing
+        asyncio.create_task(_process_and_push_webhook(
+            messages=messages,
+            task_id=task_id,
+            context_id=context_id,
+            request_id=request_id,
+            config=config,
+            push_url=push_config.url,
+            push_token=push_config.token
+        ))
+        
+        response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=accepted_result)
+        return JSONResponse(content=response.model_dump(mode='json', exclude_none=False))
+    
+    # Blocking mode: process synchronously and return complete result
+    result = await _process_with_agent(messages, config=config)
     response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
     return JSONResponse(content=response.model_dump(mode='json', exclude_none=False))
 
