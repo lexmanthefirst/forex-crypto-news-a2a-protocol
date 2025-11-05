@@ -85,20 +85,17 @@ async def _search_coingecko_id(symbol: str) -> str | None:
         for coin in coins:
             if coin.get("symbol", "").upper() == symbol.upper():
                 coin_id = coin.get("id")
-                print(f"DEBUG: Found CoinGecko ID '{coin_id}' for symbol '{symbol}'")
                 return coin_id
         
         # If no exact match, try to use the first result if it's close
         if coins:
             coin_id = coins[0].get("id")
-            print(f"DEBUG: Using first result '{coin_id}' for symbol '{symbol}'")
             return coin_id
             
     except httpx.HTTPError as exc:
-        print(f"DEBUG: CoinGecko search API failed for '{symbol}': {exc}")
+        pass
     
     # Fallback to lowercase symbol
-    print(f"DEBUG: No CoinGecko ID found for '{symbol}', using lowercase as fallback")
     return symbol.lower()
 
 
@@ -128,7 +125,6 @@ async def fetch_crypto_prices(symbols: Iterable[str]) -> dict[str, float]:
     if COINGECKO_API_KEY:
         params["x_cg_demo_api_key"] = COINGECKO_API_KEY
 
-    print(f"DEBUG: Fetching crypto prices for {symbol_list} from CoinGecko...")
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.get(url, params=params, headers=headers)

@@ -343,7 +343,6 @@ class MarketAgent:
         task_id: str,
     ) -> TaskResult:
         """Handle market summary requests with comprehensive market data."""
-        print("DEBUG: Handling market summary request")
         
         # Fetch comprehensive market data
         summary = await get_comprehensive_market_summary()
