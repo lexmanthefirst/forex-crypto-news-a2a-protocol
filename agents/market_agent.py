@@ -174,7 +174,20 @@ class MarketAgent:
             symbol=symbol
         )
         
-        agent_msg = A2AMessage(role="agent", parts=[MessagePart(kind="text", text=agent_text)], taskId=task_id)
+        # Create agent message with both text and data parts for history
+        agent_msg = A2AMessage(
+            role="agent", 
+            parts=[
+                MessagePart(kind="text", text=agent_text),
+                MessagePart(kind="data", data={
+                    "analysis": analysis,
+                    "price_snapshot": price_snapshot,
+                    "technical_data": technical_data,
+                    "news": relevant[:3]
+                })
+            ], 
+            taskId=task_id
+        )
 
         artifacts: list[Artifact] = [
             Artifact(name="analysis", parts=[MessagePart(kind="data", data=analysis)]),
@@ -183,6 +196,9 @@ class MarketAgent:
             artifacts.append(Artifact(name="price_snapshot", parts=[MessagePart(kind="data", data=price_snapshot)]))
         if technical_data:
             artifacts.append(Artifact(name="technical_indicators", parts=[MessagePart(kind="data", data=technical_data)]))
+        if relevant:
+            artifacts.append(Artifact(name="recent_news", parts=[MessagePart(kind="data", data=relevant[:3])]))
+
 
         status_state = "completed"
         if (pair and price_snapshot.get("pair", {}).get("rate") is None) and (not symbol):
