@@ -169,6 +169,7 @@ class MarketAgent:
             reasons=reasons,
             price_snapshot=price_snapshot,
             technical_data=technical_data,
+            news=relevant[:3],
             pair=pair,
             symbol=symbol
         )
@@ -381,6 +382,7 @@ class MarketAgent:
         reasons: list | str,
         price_snapshot: dict[str, Any],
         technical_data: dict[str, Any],
+        news: list[dict[str, Any]] | None = None,
         pair: str | None = None,
         symbol: str | None = None,
     ) -> str:
@@ -419,5 +421,14 @@ class MarketAgent:
             sections.append("\n**Key Factors:**")
             for reason in reasons_list[:3]:
                 sections.append(f"- {reason}")
+        
+        # Recent news headlines
+        if news:
+            sections.append("\n**Recent News:**")
+            for item in news[:3]:
+                title = item.get("title", "")
+                source = item.get("source", "")
+                if title:
+                    sections.append(f"- {title} ({source})")
         
         return "\n".join(sections)
