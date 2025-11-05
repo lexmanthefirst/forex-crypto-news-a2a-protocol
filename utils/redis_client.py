@@ -60,6 +60,16 @@ class RedisClient:
         except ValueError as exc:
             raise RuntimeError(f"Stored task payload for {task_id} is invalid") from exc
 
+    # Generic cache helpers
+    async def get_cache(self, key: str) -> Any | None:
+        """Get cached value by key."""
+        raw = await self.client.get(f"cache:{key}")
+        return json.loads(raw) if raw else None
+
+    async def set_cache(self, key: str, value: Any, ex: int = 60) -> None:
+        """Set cached value with expiration time in seconds."""
+        await self.client.set(f"cache:{key}", json.dumps(value, default=str), ex=ex)
+
 
 redis_store = RedisClient()
 
