@@ -159,12 +159,20 @@ class MarketAgent:
 
         confidence = float(analysis.get("confidence", 0.0) or 0.0)
         reasons = analysis.get("reasoning") or []
-        reasons_str = ", ".join(reasons[:3]) if isinstance(reasons, list) else str(reasons)
         direction = analysis.get("direction", "neutral")
-        agent_text = (
-            f"Analysis for {key}: direction={direction} "
-            f"confidence={confidence:.2f}. Top reasons: {reasons_str}"
+        
+        # Format the analysis message using Markdown
+        agent_text = self._format_analysis_message(
+            key=key,
+            direction=direction,
+            confidence=confidence,
+            reasons=reasons,
+            price_snapshot=price_snapshot,
+            technical_data=technical_data,
+            pair=pair,
+            symbol=symbol
         )
+        
         agent_msg = A2AMessage(role="agent", parts=[MessagePart(kind="text", text=agent_text)], taskId=task_id)
 
         artifacts: list[Artifact] = [
@@ -364,3 +372,52 @@ class MarketAgent:
             artifacts=artifacts,
             history=messages + [agent_msg],
         )
+
+    @staticmethod
+    def _format_analysis_message(
+        key: str,
+        direction: str,
+        confidence: float,
+        reasons: list | str,
+        price_snapshot: dict[str, Any],
+        technical_data: dict[str, Any],
+        pair: str | None = None,
+        symbol: str | None = None,
+    ) -> str:
+        """Format analysis results as a user-friendly Markdown message."""
+        
+        # Build message sections
+        sections = []
+        
+        # Header
+        sections.append(f"**{key} Market Analysis**\n")
+        
+        # Outlook
+        sections.append(f"**Outlook:** {direction.capitalize()} (Confidence: {confidence:.0%})")
+        
+        # Price information
+        if symbol and price_snapshot.get("crypto"):
+            crypto_price = price_snapshot["crypto"].get(symbol)
+            if crypto_price:
+                price_str = f"${crypto_price:,.8f}".rstrip('0').rstrip('.')
+                sections.append(f"**Current Price:** {price_str}")
+        elif pair and price_snapshot.get("pair"):
+            rate = price_snapshot["pair"].get("rate")
+            if rate:
+                sections.append(f"**Exchange Rate:** {rate:.4f}")
+        
+        # Technical indicators
+        if technical_data:
+            change_pct = technical_data.get("change_pct", 0)
+            trend = technical_data.get("trend", "unknown")
+            sections.append(f"**7-Day Change:** {change_pct:+.2f}%")
+            sections.append(f"**Trend:** {trend.capitalize()}")
+        
+        # Key factors/reasoning
+        reasons_list = reasons if isinstance(reasons, list) else [str(reasons)]
+        if reasons_list and reasons_list[0]:
+            sections.append("\n**Key Factors:**")
+            for reason in reasons_list[:3]:
+                sections.append(f"- {reason}")
+        
+        return "\n".join(sections)
