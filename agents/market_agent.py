@@ -275,8 +275,8 @@ class MarketAgent:
             artifacts.append(Artifact(name="price_snapshot", parts=[MessagePart(kind="data", data=price_snapshot)]))
         if technical_data:
             artifacts.append(Artifact(name="technical_indicators", parts=[MessagePart(kind="data", data=technical_data)]))
-        if relevant:
-            artifacts.append(Artifact(name="recent_news", parts=[MessagePart(kind="data", data=relevant[:3])]))
+        # Always include recent_news artifact, even if empty
+        artifacts.append(Artifact(name="recent_news", parts=[MessagePart(kind="data", data=relevant[:3] if relevant else [])]))
 
 
         status_state = "completed"
