@@ -209,6 +209,10 @@ async def _process_and_push_webhook(
         response_obj = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
         webhook_payload = response_obj.model_dump(mode='json', exclude_none=False)
         
+        # Log the webhook payload for debugging
+        logger.info(f"Sending webhook to {push_url}")
+        logger.debug(f"Webhook payload: {webhook_payload}")
+        
         # Push to Telex webhook
         headers = {
             "Content-Type": "application/json",
@@ -222,6 +226,7 @@ async def _process_and_push_webhook(
                 headers=headers
             )
             response.raise_for_status()
+            logger.info(f"Webhook delivered successfully: {response.status_code}")
             
     except httpx.HTTPStatusError as e:
         logger.error(f"Webhook HTTP error {e.response.status_code}: {e.response.text}")

@@ -50,7 +50,7 @@ class JSONRPCRequest(BaseModel):
 
 class TaskStatus(BaseModel):
     state: Literal["submitted", "working", "completed", "input-required", "failed", "rejected", "canceled", "unknown", "auth_required"]
-    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
+    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     message: A2AMessage | None = None
 
 class Artifact(BaseModel):
