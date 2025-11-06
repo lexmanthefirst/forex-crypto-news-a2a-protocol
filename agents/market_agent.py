@@ -86,13 +86,13 @@ class MarketAgent:
                         # Check for content field
                         elif "content" in part.data and isinstance(part.data["content"], str):
                             text_parts.append(part.data["content"].strip())
-                    # Handle list of text items
-                    elif isinstance(part.data, list):
-                        for item in part.data:
-                            if isinstance(item, str) and item.strip():
-                                text_parts.append(item.strip())
-                            elif isinstance(item, dict) and "text" in item:
-                                text_parts.append(str(item["text"]).strip())
+                        # Handle nested list in data
+                        elif "items" in part.data and isinstance(part.data["items"], list):
+                            for item in part.data["items"]:
+                                if isinstance(item, str) and item.strip():
+                                    text_parts.append(item.strip())
+                                elif isinstance(item, dict) and "text" in item:
+                                    text_parts.append(str(item["text"]).strip())
         
         # Combine all extracted text
         combined_text = " ".join(text_parts)
@@ -277,7 +277,7 @@ class MarketAgent:
         if technical_data:
             artifacts.append(Artifact(name="technical_indicators", parts=[MessagePart(kind="data", data=technical_data)]))
         # Always include recent_news artifact, even if empty
-        artifacts.append(Artifact(name="recent_news", parts=[MessagePart(kind="data", data=relevant[:3] if relevant else [])]))
+        artifacts.append(Artifact(name="recent_news", parts=[MessagePart(kind="data", data={"items": relevant[:3] if relevant else []})]))
 
 
         status_state = "completed"
