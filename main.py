@@ -276,14 +276,14 @@ async def _handle_message_send(request_id: str, params: MessageParams) -> JSONRe
         task_id = str(uuid.uuid4())
         context_id = str(uuid.uuid4())
         
-        logger.info("[message/send] Non-blocking: returning 'submitted' (task_id=%s)", task_id)
+        logger.info("[message/send] Non-blocking: returning 'working' (task_id=%s)", task_id)
         
         # Return accepted status immediately
         accepted_result = TaskResult(
             id=task_id,
             contextId=context_id,
             status=TaskStatus(
-                state="submitted",
+                state="working",
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 message=A2AMessage(
                     role="agent",
