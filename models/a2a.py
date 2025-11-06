@@ -1,87 +1,117 @@
+"""
+A2A Protocol Models - Telex Compatible
+
+Based on Telex A2A specification.
+Updated: November 6, 2025
+"""
 from __future__ import annotations
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Any, Literal, Optional, List, Dict
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
-# Define models for A2A messaging system
+
 class MessagePart(BaseModel):
+    """Message part - can be text, data, or file."""
     kind: Literal["text", "data", "file"]
-    text: str | None = None
-    data: dict[str, Any] | list[Any] | None = None 
-    file_url: str | None = None
+    text: Optional[str] = None
+    data: Optional[Dict[str, Any]] = None
+    file_url: Optional[str] = None
+
 
 class A2AMessage(BaseModel):
+    """A2A message format."""
     kind: Literal["message"] = "message"
     role: Literal["user", "agent", "system"]
-    parts: list[MessagePart]
+    parts: List[MessagePart]
     messageId: str = Field(default_factory=lambda: str(uuid4()))
-    taskId: str | None = None
-    metadata: dict[str, Any] | None = None
+    taskId: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
 
-# Configure message sending options
+
 class PushNotificationConfig(BaseModel):
+    """Configuration for push notifications."""
     url: str
-    token: str | None = None
-    authentication: dict[str, Any] | None = None
+    token: Optional[str] = None
+    authentication: Optional[Dict[str, Any]] = None
+
 
 class MessageConfiguration(BaseModel):
+    """Configuration for message sending."""
     blocking: bool = True
-    acceptedOutputModes: list[str] = Field(default_factory=lambda: ["text/plain", "application/json"])
-    pushNotificationConfig: PushNotificationConfig | None = None
+    acceptedOutputModes: List[str] = ["text/plain", "image/png", "image/svg+xml"]
+    pushNotificationConfig: Optional[PushNotificationConfig] = None
 
-# Params objects for JSON-RPC
+
 class MessageParams(BaseModel):
+    """Parameters for message/send method."""
     message: A2AMessage
     configuration: MessageConfiguration = Field(default_factory=MessageConfiguration)
 
-class ExecuteParams(BaseModel):
-    contextId: str | None = None
-    taskId: str | None = None
-    messages: list[A2AMessage]
 
-# JSON-RPC request models
+class ExecuteParams(BaseModel):
+    """Parameters for execute method."""
+    contextId: Optional[str] = None
+    taskId: Optional[str] = None
+    messages: List[A2AMessage]
+
+
 class JSONRPCRequest(BaseModel):
+    """JSON-RPC 2.0 request."""
     jsonrpc: Literal["2.0"]
     id: str
     method: Literal["message/send", "execute"]
     params: MessageParams | ExecuteParams
 
+
 class TaskStatus(BaseModel):
-    state: Literal["submitted", "working", "completed", "input-required", "failed", "rejected", "canceled", "unknown", "auth_required"]
+    """Task status information."""
+    state: Literal["working", "completed", "input-required", "failed"]
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    message: A2AMessage | None = None
+    message: Optional[A2AMessage] = None
+
 
 class Artifact(BaseModel):
+    """Artifact attached to a task."""
     artifactId: str = Field(default_factory=lambda: str(uuid4()))
     name: str
-    parts: list[MessagePart]
+    parts: List[MessagePart]
+
 
 class TaskResult(BaseModel):
+    """Result of a task execution."""
     id: str
     contextId: str
     status: TaskStatus
-    artifacts: list[Artifact] = Field(default_factory=list)
-    history: list[A2AMessage] = Field(default_factory=list)
+    artifacts: List[Artifact] = []
+    history: List[A2AMessage] = []
     kind: Literal["task"] = "task"
 
+
 class JSONRPCResponse(BaseModel):
-    jsonrpc: Literal["2.0"]
+    """JSON-RPC 2.0 response."""
+    jsonrpc: Literal["2.0"] = "2.0"
     id: str
-    result: TaskResult | A2AMessage | None = None
-    error: dict[str, Any] | None = None
+    result: Optional[TaskResult] = None
+    error: Optional[Dict[str, Any]] = None
 
     def model_dump(self, **kwargs):
         """Ensure proper JSON-RPC response format.
-        - Include 'result' field with full data (including artifacts)
-        - Exclude 'error' field when None (JSON-RPC spec: either result OR error, not both)
+        
+        JSON-RPC 2.0 spec: response must have either 'result' OR 'error', never both.
+        - Include 'result' field when successful
+        - Include 'error' field when failed
+        - Exclude the other field
         """
         data = super().model_dump(**kwargs)
+        
         # Remove error field if it's None (proper JSON-RPC: either result or error, never both)
         if self.error is None and 'error' in data:
             del data['error']
+        
         # Remove result field if error is present
         if self.error is not None and 'result' in data:
             del data['result']
+        
         return data
