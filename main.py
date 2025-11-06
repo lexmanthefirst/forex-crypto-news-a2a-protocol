@@ -201,20 +201,23 @@ async def _process_and_push_webhook(
             config=config.model_dump(mode='json') if config else None,
         )
         
-        # Build webhook payload (JSON-RPC response format - NOT request format!)
-        webhook_payload = {
-            "jsonrpc": "2.0",
-            "id": request_id,  # Use original request ID
-            "result": result.model_dump(mode='json', exclude_none=False)
-        }
+        # Build webhook payload (direct TaskResult - no JSON-RPC wrapper!)
+        # Telex webhook expects the TaskResult directly, not in JSON-RPC format
+        webhook_payload = result.model_dump(mode='json', exclude_none=False)
         
-        # DEBUG: Log webhook details
-        print(f"📤 Webhook URL: {push_url}")
-        print(f"📤 Request ID: {request_id}")
-        print(f"📤 Task ID: {task_id}")
-        print(f"📤 Context ID: {context_id}")
-        print(f"📤 Payload keys: {list(webhook_payload.keys())}")
-        print(f"📤 Result keys: {list(webhook_payload['result'].keys())}")
+        # DEBUG: Log webhook details for Railway
+        import json
+        print("="*80)
+        print("📤 WEBHOOK DEBUG - Sending to Telex")
+        print("="*80)
+        print(f"URL: {push_url}")
+        print(f"Request ID: {request_id}")
+        print(f"Task ID: {task_id}")
+        print(f"Context ID: {context_id}")
+        print(f"Payload Structure: TaskResult (direct, no JSON-RPC wrapper)")
+        print(f"Payload Keys: {list(webhook_payload.keys())}")
+        print(f"\nFull Payload:\n{json.dumps(webhook_payload, indent=2)}")
+        print("="*80)
         
         # Push to Telex webhook
         headers = {
@@ -230,17 +233,25 @@ async def _process_and_push_webhook(
             )
             
             # DEBUG: Log response details
-            print(f"📥 Response status: {response.status_code}")
-            print(f"📥 Response headers: {dict(response.headers)}")
-            print(f"📥 Response body: {response.text[:500]}")
+            print("="*80)
+            print("📥 WEBHOOK RESPONSE from Telex")
+            print("="*80)
+            print(f"Status Code: {response.status_code}")
+            print(f"Headers: {dict(response.headers)}")
+            print(f"Response Body:\n{response.text}")
+            print("="*80)
             
             response.raise_for_status()
-            print(f"✅ Webhook push successful!")
+            print("✅ Webhook push successful!")
             
     except httpx.HTTPStatusError as e:
-        print(f"❌ Webhook HTTP error: {e.response.status_code}")
-        print(f"❌ Response body: {e.response.text}")
-        print(f"❌ Request was: {e.request.method} {e.request.url}")
+        print("="*80)
+        print("❌ WEBHOOK ERROR")
+        print("="*80)
+        print(f"Status Code: {e.response.status_code}")
+        print(f"Response Body:\n{e.response.text}")
+        print(f"Request: {e.request.method} {e.request.url}")
+        print("="*80)
         traceback.print_exc()
     except Exception as e:
         print(f"❌ Webhook push failed: {e}")
