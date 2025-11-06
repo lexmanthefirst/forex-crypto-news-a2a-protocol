@@ -207,10 +207,9 @@ async def _process_and_push_webhook(
             config=config.model_dump(mode='json', by_alias=True) if config else None,
         )
         
-        # Build webhook payload - must match format of initial 202 response
-        # Use JSONRPCResponse model for consistency with other endpoints
-        response_obj = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
-        webhook_payload = response_obj.model_dump(mode='json', by_alias=True, exclude_none=True)
+        # Build webhook payload - Telex expects ONLY the status object, not full TaskResult
+        # This matches the working Fashion agent implementation
+        webhook_payload = result.status.model_dump(mode='json', by_alias=True, exclude_none=True)
         
         # Log webhook attempt with full payload for debugging
         logger.info("[webhook] Sending to %s (task_id=%s, status=%s)", 
