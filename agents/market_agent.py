@@ -291,7 +291,7 @@ class MarketAgent:
         if (pair and price_snapshot.get("pair", {}).get("rate") is None) and (not symbol):
             status_state = "failed"
 
-        task_status = TaskStatus(state=status_state, message=agent_msg)
+        task_status = TaskStatus(status=status_state, message=agent_msg)
         
         # Store agent response in session history
         try:
@@ -503,7 +503,7 @@ class MarketAgent:
             ),
         ]
         
-        task_status = TaskStatus(state="completed", message=agent_msg)
+        task_status = TaskStatus(status="completed", message=agent_msg)
         
         return TaskResult(
             id=task_id,

@@ -65,7 +65,7 @@ class JSONRPCRequest(BaseModel):
 
 class TaskStatus(BaseModel):
     """Task status information."""
-    state: Literal["working", "completed", "input-required", "failed"]
+    status: Literal["working", "completed", "input-required", "failed"]
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     message: Optional[A2AMessage] = None
 

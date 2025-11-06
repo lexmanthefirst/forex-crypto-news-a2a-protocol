@@ -154,7 +154,7 @@ def analyze_sync(subject: str, price_snapshot: dict[str, Any], news_summary: str
         ],
     )
 
-    status = TaskStatus(state="completed", message=message)
+    status = TaskStatus(status="completed", message=message)
 
     artifact = Artifact(name=f"Gemini analysis for {subject}", parts=message.parts)
 

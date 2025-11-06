@@ -213,8 +213,8 @@ async def _process_and_push_webhook(
         webhook_payload = response_obj.model_dump(mode='json', by_alias=True, exclude_none=True)
         
         # Log webhook attempt with full payload for debugging
-        logger.info("[webhook] Sending to %s (task_id=%s, state=%s)", 
-                   push_url, task_id, result.status.state)
+        logger.info("[webhook] Sending to %s (task_id=%s, status=%s)", 
+                   push_url, task_id, result.status.status)
         logger.info("[webhook] Full payload: %s", json.dumps(webhook_payload, indent=2)[:500])
         
         # Push to Telex webhook
@@ -281,7 +281,7 @@ async def _handle_message_send(request_id: str, params: MessageParams) -> JSONRe
             id=task_id,
             contextId=context_id,
             status=TaskStatus(
-                state="working",
+                status="working",
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 message=A2AMessage(
                     role="agent",
@@ -311,7 +311,7 @@ async def _handle_message_send(request_id: str, params: MessageParams) -> JSONRe
     # Blocking mode: process synchronously and return complete result
     logger.info("[message/send] Blocking: processing synchronously")
     result = await _process_with_agent(messages, config=config)
-    logger.info("[message/send] Processing complete: state=%s", result.status.state)
+    logger.info("[message/send] Processing complete: status=%s", result.status.status)
     response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
     return JSONResponse(content=response.model_dump(mode='json', by_alias=True, exclude_none=True))
 
