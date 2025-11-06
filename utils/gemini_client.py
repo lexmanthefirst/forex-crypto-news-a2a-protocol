@@ -168,3 +168,44 @@ def analyze_sync(subject: str, price_snapshot: dict[str, Any], news_summary: str
         artifacts=[artifact],
         history=[message],
     )
+
+
+def generate_text_sync(prompt: str, temperature: float = 0.7, timeout: int = 10) -> str:
+    """
+    Generate text using Gemini for simple prompt completions.
+    
+    Args:
+        prompt: The prompt text
+        temperature: Controls randomness (0.0 = deterministic, 1.0 = creative)
+        timeout: Request timeout in seconds
+    
+    Returns:
+        Generated text, or empty string on failure
+    """
+    if not GEMINI_API_KEY or genai is None:
+        return ""
+    
+    try:
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+            config={"temperature": temperature}
+        )
+        
+        # Extract text from response
+        if hasattr(response, 'text'):
+            return response.text
+        elif hasattr(response, 'candidates'):
+            for candidate in response.candidates:
+                if hasattr(candidate, 'content'):
+                    content = candidate.content
+                    if hasattr(content, 'parts'):
+                        for part in content.parts:
+                            if hasattr(part, 'text'):
+                                return part.text
+        return ""
+        
+    except Exception as exc:
+        # Silently fail for simple text generation
+        return ""
