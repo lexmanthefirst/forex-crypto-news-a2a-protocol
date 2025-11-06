@@ -14,6 +14,7 @@ from utils.gemini_client import analyze_sync
 from utils.market_summary import get_comprehensive_market_summary, format_market_summary_text
 from utils.news_fetcher import fetch_combined_news, fetch_crypto_prices, fetch_forex_rate
 from utils.notifier import send_console_notification, send_webhook_notification
+from utils.prompt_extraction import extract_coin_with_llm
 from utils.redis_client import redis_store
 from utils.session_store import session_store
 from utils.technical_analysis import get_technical_summary
@@ -332,44 +333,28 @@ class MarketAgent:
         return None
 
     def _extract_symbol(self, text: str) -> str | None:
-        """Extract cryptocurrency symbol from text using CoinGecko alias resolution.
+        """Extract cryptocurrency symbol from text using LLM-based extraction.
         
-        This method now uses the coin alias resolution system to handle:
-        - Common symbols: BTC, ETH, SOL
-        - Full names: Bitcoin, Ethereum, Solana
-        - Various capitalizations: bitcoin, BITCOIN, Bitcoin
+        Uses a prompt-based approach that intelligently:
+        - Understands context and ignores command words
+        - Handles various coin name formats (BTC, bitcoin, Bitcoin)
+        - Avoids false matches with random words
         
         Returns the CoinGecko ID (e.g., "bitcoin") for compatibility with price APIs.
         """
-        # First, try to match known cryptocurrency names/symbols using the alias system
-        # This prioritizes real coins over generic word matches
-        words = re.findall(r'\b[a-zA-Z]{2,}\b', text)
-        for word in words:
-            coin_id = resolve_coin_alias(word)
+        # Try LLM-based extraction first (most accurate)
+        coin_query = extract_coin_with_llm(text)
+        if coin_query:
+            # Try to resolve to CoinGecko ID
+            coin_id = resolve_coin_alias(coin_query)
             if coin_id:
+                logger.info(f"[LLM] Extracted '{coin_query}' -> resolved to '{coin_id}'")
                 return coin_id
+            # If not in alias map, use as-is (lowercase)
+            logger.info(f"[LLM] Extracted '{coin_query}' (no alias, using lowercase)")
+            return coin_query.lower()
         
-        # Fallback: Try direct regex match for crypto symbols
-        # But exclude common English words and question words
-        m = SYMBOL_RE.search(text.upper())
-        if m:
-            symbol = m.group(1).upper()
-            # Extended exclusion list: common words + words that appear in queries
-            excluded_words = {
-                "TO", "THE", "AND", "OR", "FOR", "IN", "ON", "AT", "BY", "IS", "ARE", "WAS", "IT",
-                "WHAT", "WHEN", "WHERE", "WHO", "WHY", "HOW", "CAN", "WILL", "WITH", "FROM",
-                "THIS", "THAT", "HAVE", "HAS", "HAD", "NOT", "BUT", "BEEN", "ABOUT", "INTO",
-                "NEWS", "LATEST", "UPDATE", "PRICE", "ANALYSIS", "MARKET", "TELL", "SHOW", "GET"
-            }
-            if symbol not in excluded_words:
-                # Try to resolve the symbol to a CoinGecko ID
-                coin_id = resolve_coin_alias(symbol)
-                if coin_id:
-                    return coin_id
-                # Fallback to original symbol if no alias found
-                return symbol
-        
-        # Legacy fallback for backward compatibility
+        # Fallback to legacy crypto_map for common coins
         crypto_map = {
             "bitcoin": "bitcoin",
             "ethereum": "ethereum",
@@ -393,8 +378,10 @@ class MarketAgent:
         text_lower = text.lower()
         for name, coin_id in crypto_map.items():
             if name in text_lower:
+                logger.info(f"[Fallback] Matched '{name}' -> '{coin_id}'")
                 return coin_id
         
+        logger.warning(f"Could not extract valid coin symbol from: {text}")
         return None
 
     def _filter_relevant_news(
