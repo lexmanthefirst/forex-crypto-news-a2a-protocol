@@ -211,9 +211,13 @@ async def _process_and_push_webhook(
         response_obj = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
         webhook_payload = response_obj.model_dump(mode='json', exclude_none=False)
         
-        # Log the webhook payload for debugging
-        logger.info(f"Sending webhook to {push_url}")
-        logger.debug(f"Webhook payload: {webhook_payload}")
+        # Log webhook attempt
+        logger.info("[webhook] Sending to %s (task_id=%s, state=%s)", 
+                   push_url, task_id, result.status.state)
+        logger.debug("[webhook] Payload preview: jsonrpc=%s id=%s result.status.state=%s", 
+                    webhook_payload.get("jsonrpc"), 
+                    webhook_payload.get("id"),
+                    webhook_payload.get("result", {}).get("status", {}).get("state"))
         
         # Push to Telex webhook
         headers = {
@@ -228,12 +232,14 @@ async def _process_and_push_webhook(
                 headers=headers
             )
             response.raise_for_status()
-            logger.info(f"Webhook delivered successfully: {response.status_code}")
+            logger.info("[webhook] ✓ Delivered successfully: status=%s task_id=%s", 
+                       response.status_code, task_id)
             
     except httpx.HTTPStatusError as e:
-        logger.error(f"Webhook HTTP error {e.response.status_code}: {e.response.text}")
+        logger.error("[webhook] ✗ HTTP error %s: %s (task_id=%s)", 
+                    e.response.status_code, e.response.text, task_id)
     except Exception as e:
-        logger.error(f"Webhook push failed: {e}")
+        logger.error("[webhook] ✗ Failed: %s (task_id=%s)", e, task_id, exc_info=True)
 
 
 async def _handle_message_send(request_id: str, params: MessageParams) -> JSONResponse:
@@ -246,6 +252,12 @@ async def _handle_message_send(request_id: str, params: MessageParams) -> JSONRe
     messages = [params.message]
     config = params.configuration
     
+    # Log incoming message details
+    user_message = messages[0] if messages else None
+    if user_message and user_message.parts:
+        text_preview = next((p.text[:50] for p in user_message.parts if p.text), "")
+        logger.info("[message/send] Processing message: text=%r...", text_preview)
+    
     # Check if non-blocking mode is requested
     is_blocking = True
     push_config = None
@@ -255,10 +267,16 @@ async def _handle_message_send(request_id: str, params: MessageParams) -> JSONRe
         is_blocking = config.blocking if hasattr(config, 'blocking') and config.blocking is not None else True
         push_config = config.pushNotificationConfig if hasattr(config, 'pushNotificationConfig') else None
     
+    logger.info("[message/send] Mode: %s, webhook_configured: %s", 
+               "blocking" if is_blocking else "non-blocking",
+               bool(push_config and push_config.url))
+    
     # Non-blocking mode: return accepted, process in background
     if not is_blocking and push_config and push_config.url and push_config.token:
         task_id = str(uuid.uuid4())
         context_id = str(uuid.uuid4())
+        
+        logger.info("[message/send] Non-blocking: returning 'submitted' (task_id=%s)", task_id)
         
         # Return accepted status immediately
         accepted_result = TaskResult(
@@ -289,10 +307,13 @@ async def _handle_message_send(request_id: str, params: MessageParams) -> JSONRe
         ))
         
         response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=accepted_result)
+        logger.info("[message/send] Accepted response sent (task_id=%s)", task_id)
         return JSONResponse(content=response.model_dump(mode='json', exclude_none=False))
     
     # Blocking mode: process synchronously and return complete result
+    logger.info("[message/send] Blocking: processing synchronously")
     result = await _process_with_agent(messages, config=config)
+    logger.info("[message/send] Processing complete: state=%s", result.status.state)
     response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
     return JSONResponse(content=response.model_dump(mode='json', exclude_none=False))
 
@@ -312,29 +333,66 @@ async def _handle_execute(request_id: str, params: ExecuteParams) -> JSONRespons
 # A2A Protocol Routes
 @a2a_router.post("/market")
 async def a2a_endpoint(request: Request):
-    """Main A2A protocol endpoint for market analysis requests."""
+    """Main A2A protocol endpoint for market analysis requests.
+    
+    Handles JSON-RPC 2.0 requests with methods:
+    - message/send: Process user message and return analysis
+    - execute: Execute analysis task
+    """
+    # Log incoming request
+    try:
+        body = await request.json()
+        logger.info("[a2a] Incoming request: method=%s id=%s", 
+                   body.get("method"), body.get("id"))
+    except Exception as e:
+        logger.error("[a2a] Failed to parse request body: %s", e)
+        error_response = {
+            "jsonrpc": "2.0",
+            "id": None,
+            "error": {
+                "code": A2AErrorCode.PARSE_ERROR,
+                "message": "Parse error",
+                "data": {"details": str(e)}
+            }
+        }
+        return JSONResponse(status_code=200, content=error_response)
+    
     # Parse and validate request
-    body = await _parse_request_body(request)
-    if isinstance(body, JSONResponse):
-        return body  # Error response
+    body_result = await _parse_request_body(request)
+    if isinstance(body_result, JSONResponse):
+        logger.error("[a2a] Request parsing failed")
+        return body_result
     
     # Use lenient validation (returns HTTP 200 even for errors)
-    rpc = await _validate_jsonrpc_request(body, lenient=True)
+    rpc = await _validate_jsonrpc_request(body_result, lenient=True)
     if isinstance(rpc, JSONResponse):
-        return rpc  # Error response (but HTTP 200)
+        logger.error("[a2a] JSON-RPC validation failed")
+        return rpc
     
     # Process the request
     try:
         params = rpc.params
+        response = None
         
         if isinstance(params, MessageParams):
-            return await _handle_message_send(rpc.id, params)
+            logger.info("[a2a] Processing message/send")
+            response = await _handle_message_send(rpc.id, params)
         elif isinstance(params, ExecuteParams):
-            return await _handle_execute(rpc.id, params)
+            logger.info("[a2a] Processing execute")
+            response = await _handle_execute(rpc.id, params)
         else:
-            raise ValueError("Unsupported params payload")
+            raise ValueError(f"Unsupported params type: {type(params)}")
+        
+        # Log successful response
+        if response:
+            logger.info("[a2a] Response sent: id=%s status=success", rpc.id)
+        
+        return response
             
     except Exception as exc:
+        # Log error with full traceback
+        logger.error("[a2a] Unhandled error: %s", exc, exc_info=True)
+        
         # Return error as JSON-RPC error response (HTTP 200)
         error_payload = {
             "jsonrpc": "2.0",
@@ -345,6 +403,7 @@ async def a2a_endpoint(request: Request):
                 "data": {"details": str(exc), "trace": traceback.format_exc()}
             }
         }
+        logger.info("[a2a] Error response sent: id=%s", rpc.id)
         return JSONResponse(status_code=200, content=error_payload)
 
 
