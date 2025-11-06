@@ -15,7 +15,7 @@ class MessagePart(BaseModel):
     kind: Literal["text", "data", "file"]
     text: Optional[str] = None
     data: Optional[Union[Dict[str, Any], List[Any]]] = None
-    file_url: Optional[str] = None
+    fileUrl: Optional[str] = None
 
 
 class A2AMessage(BaseModel):

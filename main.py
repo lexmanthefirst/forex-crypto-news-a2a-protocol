@@ -18,6 +18,7 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import traceback
@@ -203,21 +204,18 @@ async def _process_and_push_webhook(
             messages,
             context_id=context_id,
             task_id=task_id,
-            config=config.model_dump(mode='json') if config else None,
+            config=config.model_dump(mode='json', by_alias=True) if config else None,
         )
         
         # Build webhook payload - must match format of initial 202 response
         # Use JSONRPCResponse model for consistency with other endpoints
         response_obj = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
-        webhook_payload = response_obj.model_dump(mode='json', exclude_none=False)
+        webhook_payload = response_obj.model_dump(mode='json', by_alias=True, exclude_none=False)
         
-        # Log webhook attempt
+        # Log webhook attempt with full payload for debugging
         logger.info("[webhook] Sending to %s (task_id=%s, state=%s)", 
                    push_url, task_id, result.status.state)
-        logger.debug("[webhook] Payload preview: jsonrpc=%s id=%s result.status.state=%s", 
-                    webhook_payload.get("jsonrpc"), 
-                    webhook_payload.get("id"),
-                    webhook_payload.get("result", {}).get("status", {}).get("state"))
+        logger.info("[webhook] Full payload: %s", json.dumps(webhook_payload, indent=2)[:500])
         
         # Push to Telex webhook
         headers = {
@@ -308,14 +306,14 @@ async def _handle_message_send(request_id: str, params: MessageParams) -> JSONRe
         
         response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=accepted_result)
         logger.info("[message/send] Accepted response sent (task_id=%s)", task_id)
-        return JSONResponse(content=response.model_dump(mode='json', exclude_none=False))
+        return JSONResponse(content=response.model_dump(mode='json', by_alias=True, exclude_none=False))
     
     # Blocking mode: process synchronously and return complete result
     logger.info("[message/send] Blocking: processing synchronously")
     result = await _process_with_agent(messages, config=config)
     logger.info("[message/send] Processing complete: state=%s", result.status.state)
     response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
-    return JSONResponse(content=response.model_dump(mode='json', exclude_none=False))
+    return JSONResponse(content=response.model_dump(mode='json', by_alias=True, exclude_none=False))
 
 
 async def _handle_execute(request_id: str, params: ExecuteParams) -> JSONResponse:
@@ -326,7 +324,7 @@ async def _handle_execute(request_id: str, params: ExecuteParams) -> JSONRespons
         task_id=params.taskId,
     )
     response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
-    return JSONResponse(content=response.model_dump(mode='json', exclude_none=False))
+    return JSONResponse(content=response.model_dump(mode='json', by_alias=True, exclude_none=False))
 
 
 
