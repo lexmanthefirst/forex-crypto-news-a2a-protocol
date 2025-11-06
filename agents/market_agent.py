@@ -326,7 +326,11 @@ class MarketAgent:
         if m:
             symbol = m.group(1).upper()
             # Filter out common English words that might match
-            excluded_words = {"TO", "THE", "AND", "OR", "FOR", "IN", "ON", "AT", "BY", "IS", "ARE", "WAS", "IT"}
+            excluded_words = {
+                "TO", "THE", "AND", "OR", "FOR", "IN", "ON", "AT", "BY", "IS", "ARE", "WAS", "IT",
+                "WHAT", "WHEN", "WHERE", "WHO", "WHY", "HOW", "CAN", "WILL", "WITH", "FROM",
+                "THIS", "THAT", "HAVE", "HAS", "HAD", "NOT", "BUT", "BEEN", "ABOUT", "INTO"
+            }
             if symbol not in excluded_words:
                 # Try to resolve the symbol to a CoinGecko ID
                 coin_id = resolve_coin_alias(symbol)
