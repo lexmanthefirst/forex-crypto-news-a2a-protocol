@@ -76,7 +76,7 @@ class MarketAgent:
         if not text_parts:
             for part in message.parts:
                 if part.kind == "data" and part.data:
-                    # Handle case where data contains text field
+                    # Handle case where data is a dict with text field
                     if isinstance(part.data, dict):
                         if "text" in part.data and part.data["text"]:
                             text_parts.append(str(part.data["text"]).strip())
@@ -93,6 +93,13 @@ class MarketAgent:
                                     text_parts.append(item.strip())
                                 elif isinstance(item, dict) and "text" in item:
                                     text_parts.append(str(item["text"]).strip())
+                    # Handle case where data is a list directly (Telex compatibility)
+                    elif isinstance(part.data, list):
+                        for item in part.data:
+                            if isinstance(item, str) and item.strip():
+                                text_parts.append(item.strip())
+                            elif isinstance(item, dict) and "text" in item:
+                                text_parts.append(str(item["text"]).strip())
         
         # Combine all extracted text
         combined_text = " ".join(text_parts)
