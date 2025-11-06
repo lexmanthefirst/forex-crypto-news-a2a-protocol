@@ -29,7 +29,7 @@ from typing import Any, Awaitable, cast
 import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, APIRouter
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -52,6 +52,7 @@ from models.a2a import (
 from utils.errors import A2AErrorCode, create_error_response
 from utils.redis_client import redis_store
 
+
 app = FastAPI(title="Market Intelligence A2A", version="1.0.0", docs_url="/docs")
 app.add_middleware(
     CORSMiddleware,
@@ -60,6 +61,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Create routers for organized endpoint management
+a2a_router = APIRouter(prefix="/a2a/agent", tags=["A2A Protocol"])
+system_router = APIRouter(tags=["System"])
+
 scheduler = AsyncIOScheduler()
 market_agent: MarketAgent | None = None
 
@@ -110,10 +116,8 @@ async def _scheduled_analysis_job() -> None:
             traceback.print_exc()
 
 
-# ===========================
-# Request Parsing & Validation
-# ===========================
 
+# Request Parsing & Validation
 async def _parse_request_body(request: Request) -> dict[str, Any] | JSONResponse:
     """Parse incoming request body."""
     try:
@@ -178,10 +182,8 @@ def _create_internal_error_response(request_id: str, exc: Exception) -> JSONResp
     return JSONResponse(status_code=500, content=error_response)
 
 
-# ===========================
-# Request Handlers
-# ===========================
 
+# Request Handlers
 async def _process_and_push_webhook(
     messages: list[A2AMessage],
     task_id: str,
@@ -306,7 +308,9 @@ async def _handle_execute(request_id: str, params: ExecuteParams) -> JSONRespons
     return JSONResponse(content=response.model_dump(mode='json', exclude_none=False))
 
 
-@app.post("/a2a/agent/market")
+
+# A2A Protocol Routes
+@a2a_router.post("/market")
 async def a2a_endpoint(request: Request):
     """Main A2A protocol endpoint for market analysis requests."""
     # Parse and validate request
@@ -343,7 +347,9 @@ async def a2a_endpoint(request: Request):
         }
         return JSONResponse(status_code=200, content=error_payload)
 
-@app.get("/health")
+
+# System Routes
+@system_router.get("/health")
 async def health_check():
     """Health check endpoint."""
     ok: dict[str, Any] = {"status": "healthy", "dependencies": {}}
@@ -356,8 +362,8 @@ async def health_check():
     return ok
 
 
-@app.get("/agent.json")
-@app.get("/.well-known/agent.json")
+@system_router.get("/agent.json")
+@system_router.get("/.well-known/agent.json")
 async def agent_manifest():
     """Agent manifest/discovery endpoint for A2A protocol.
     
@@ -431,6 +437,14 @@ async def agent_manifest():
     }
 
 
+
+# Register Routers
+app.include_router(a2a_router)
+app.include_router(system_router)
+
+
+
+# Main Entry Point
 if __name__ == "__main__":
     import uvicorn
 
@@ -438,10 +452,8 @@ if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
 
 
-# ===========================
-# Agent Processing
-# ===========================
 
+# Agent Processing
 async def _process_with_agent(
     messages: list[A2AMessage],
     *,
