@@ -1,22 +1,20 @@
 """
-A2A Protocol Models - Telex Compatible
-
-Based on Telex A2A specification.
-Updated: November 6, 2025
+A2A Protocol Models
 """
 from __future__ import annotations
 from datetime import datetime, timezone
-from typing import Any, Literal, Optional, List, Dict
+from typing import Any, Literal, Optional, List, Dict, Union
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
 
 class MessagePart(BaseModel):
-    """Message part - can be text, data, or file."""
+    """Message part - can be text, data, or file.
+    """
     kind: Literal["text", "data", "file"]
     text: Optional[str] = None
-    data: Optional[Dict[str, Any]] = None
+    data: Optional[Union[Dict[str, Any], List[Any]]] = None
     file_url: Optional[str] = None
 
 
