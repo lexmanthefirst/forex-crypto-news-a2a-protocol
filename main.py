@@ -204,13 +204,10 @@ async def _process_and_push_webhook(
             config=config.model_dump(mode='json') if config else None,
         )
         
-        # Build webhook payload (JSON-RPC response format)
-        # Telex webhook expects JSON-RPC 2.0 response with jsonrpc, id, and result fields
-        webhook_payload = {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "result": result.model_dump(mode='json', exclude_none=False)
-        }
+        # Build webhook payload - must match format of initial 202 response
+        # Use JSONRPCResponse model for consistency with other endpoints
+        response_obj = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
+        webhook_payload = response_obj.model_dump(mode='json', exclude_none=False)
         
         # Push to Telex webhook
         headers = {
