@@ -153,7 +153,7 @@ async def _validate_jsonrpc_request(body: dict[str, Any], lenient: bool = False)
                 "jsonrpc": "2.0",
                 "id": request_id,
                 "error": {
-                    "code": A2AErrorCode.INVALID_REQUEST,
+                    "code": A2AErrorCode.INVALID_REQUEST.value,
                     "message": "Invalid Request",
                     "data": {"details": str(exc)}
                 }
@@ -350,7 +350,7 @@ async def a2a_endpoint(request: Request):
             "jsonrpc": "2.0",
             "id": None,
             "error": {
-                "code": A2AErrorCode.PARSE_ERROR,
+                "code": A2AErrorCode.PARSE_ERROR.value,
                 "message": "Parse error",
                 "data": {"details": str(e)}
             }
@@ -398,7 +398,7 @@ async def a2a_endpoint(request: Request):
             "jsonrpc": "2.0",
             "id": rpc.id,
             "error": {
-                "code": A2AErrorCode.INTERNAL_ERROR,
+                "code": A2AErrorCode.INTERNAL_ERROR.value,
                 "message": "Internal error",
                 "data": {"details": str(exc), "trace": traceback.format_exc()}
             }
