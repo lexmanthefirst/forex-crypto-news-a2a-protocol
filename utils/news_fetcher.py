@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from datetime import datetime, timezone
 from typing import Any, Iterable
@@ -8,6 +9,8 @@ from typing import Any, Iterable
 import httpx
 
 from utils.caching import redis_cache
+
+logger = logging.getLogger(__name__)
 
 COINGECKO_BASE = os.getenv("COINGECKO_BASE", "https://api.coingecko.com/api/v3")
 ALPHAVANTAGE_BASE = os.getenv("ALPHAVANTAGE_BASE", "https://www.alphavantage.co/query")
@@ -68,6 +71,8 @@ def _normalize_timestamp(timestamp: str | None) -> str | None:
 async def _search_coingecko_id(symbol: str) -> str | None:
     """Search CoinGecko for a coin ID by symbol.
     Returns the coin ID if found, otherwise returns the symbol in lowercase as fallback.
+    
+    Only accepts exact symbol matches to avoid false positives.
     """
     url = f"{COINGECKO_BASE}/search"
     params = {"query": symbol}
@@ -79,6 +84,12 @@ async def _search_coingecko_id(symbol: str) -> str | None:
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.get(url, params=params, headers=headers)
+            
+            # Check for rate limit (429)
+            if response.status_code == 429:
+                logger.error("CoinGecko rate limit exceeded (429)")
+                return symbol.lower()
+            
             response.raise_for_status()
             data = response.json()
         
@@ -87,15 +98,20 @@ async def _search_coingecko_id(symbol: str) -> str | None:
         for coin in coins:
             if coin.get("symbol", "").upper() == symbol.upper():
                 coin_id = coin.get("id")
+                logger.debug(f"Found exact match: {symbol} -> {coin_id}")
                 return coin_id
         
-        # If no exact match, try to use the first result if it's close
-        if coins:
-            coin_id = coins[0].get("id")
-            return coin_id
+        # REMOVED: Don't use first result if no exact match - this causes wrong coins!
+        # If no exact match found, log warning and fallback to lowercase
+        logger.warning(f"No exact match found for symbol '{symbol}' in CoinGecko search")
             
     except httpx.HTTPError as exc:
-        pass
+        # Check for rate limit
+        response = getattr(exc, 'response', None)
+        if response and response.status_code == 429:
+            logger.error("CoinGecko rate limit exceeded (429)")
+        else:
+            logger.warning(f"CoinGecko search failed for '{symbol}': {exc}")
     
     # Fallback to lowercase symbol
     return symbol.lower()
