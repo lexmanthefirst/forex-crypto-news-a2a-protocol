@@ -18,6 +18,7 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import traceback
 import uuid
@@ -33,6 +34,8 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 from agents.market_agent import MarketAgent
 from models.a2a import (
@@ -201,23 +204,9 @@ async def _process_and_push_webhook(
             config=config.model_dump(mode='json') if config else None,
         )
         
-        # Build webhook payload (direct TaskResult - no JSON-RPC wrapper!)
+        # Build webhook payload (direct TaskResult - no JSON-RPC wrapper)
         # Telex webhook expects the TaskResult directly, not in JSON-RPC format
         webhook_payload = result.model_dump(mode='json', exclude_none=False)
-        
-        # DEBUG: Log webhook details for Railway
-        import json
-        print("="*80)
-        print("📤 WEBHOOK DEBUG - Sending to Telex")
-        print("="*80)
-        print(f"URL: {push_url}")
-        print(f"Request ID: {request_id}")
-        print(f"Task ID: {task_id}")
-        print(f"Context ID: {context_id}")
-        print(f"Payload Structure: TaskResult (direct, no JSON-RPC wrapper)")
-        print(f"Payload Keys: {list(webhook_payload.keys())}")
-        print(f"\nFull Payload:\n{json.dumps(webhook_payload, indent=2)}")
-        print("="*80)
         
         # Push to Telex webhook
         headers = {
@@ -231,31 +220,12 @@ async def _process_and_push_webhook(
                 json=webhook_payload,
                 headers=headers
             )
-            
-            # DEBUG: Log response details
-            print("="*80)
-            print("📥 WEBHOOK RESPONSE from Telex")
-            print("="*80)
-            print(f"Status Code: {response.status_code}")
-            print(f"Headers: {dict(response.headers)}")
-            print(f"Response Body:\n{response.text}")
-            print("="*80)
-            
             response.raise_for_status()
-            print("✅ Webhook push successful!")
             
     except httpx.HTTPStatusError as e:
-        print("="*80)
-        print("❌ WEBHOOK ERROR")
-        print("="*80)
-        print(f"Status Code: {e.response.status_code}")
-        print(f"Response Body:\n{e.response.text}")
-        print(f"Request: {e.request.method} {e.request.url}")
-        print("="*80)
-        traceback.print_exc()
+        logger.error(f"Webhook HTTP error {e.response.status_code}: {e.response.text}")
     except Exception as e:
-        print(f"❌ Webhook push failed: {e}")
-        traceback.print_exc()
+        logger.error(f"Webhook push failed: {e}")
 
 
 async def _handle_message_send(request_id: str, params: MessageParams) -> JSONResponse:

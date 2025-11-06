@@ -35,17 +35,14 @@ async def get_top_cryptos_by_market_cap(limit: int = 10) -> list[dict[str, Any]]
     if COINGECKO_API_KEY:
         params["x_cg_demo_api_key"] = COINGECKO_API_KEY
     
-    print(f"DEBUG: Fetching top {limit} cryptos by market cap...")
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             response = await client.get(url, params=params, headers=headers)
             response.raise_for_status()
             data = response.json()
         
-        print(f"DEBUG: Fetched {len(data)} cryptocurrencies")
         return data
-    except Exception as exc:
-        print(f"DEBUG: Failed to fetch top cryptos: {exc}")
+    except Exception:
         return []
 
 
@@ -60,7 +57,6 @@ async def get_trending_cryptos() -> list[dict[str, Any]]:
     if COINGECKO_API_KEY:
         params["x_cg_demo_api_key"] = COINGECKO_API_KEY
     
-    print(f"DEBUG: Fetching trending cryptocurrencies...")
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             response = await client.get(url, params=params, headers=headers)
@@ -79,10 +75,8 @@ async def get_trending_cryptos() -> list[dict[str, Any]]:
                 "price_btc": coin_data.get("price_btc"),
             })
         
-        print(f"DEBUG: Fetched {len(trending)} trending coins")
         return trending
-    except Exception as exc:
-        print(f"DEBUG: Failed to fetch trending cryptos: {exc}")
+    except Exception:
         return []
 
 
@@ -97,7 +91,6 @@ async def get_recently_added_cryptos(limit: int = 5) -> list[dict[str, Any]]:
     if COINGECKO_API_KEY:
         params["x_cg_demo_api_key"] = COINGECKO_API_KEY
     
-    print(f"DEBUG: Fetching recently added cryptocurrencies...")
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             response = await client.get(url, params=params, headers=headers)
@@ -106,10 +99,8 @@ async def get_recently_added_cryptos(limit: int = 5) -> list[dict[str, Any]]:
         
         # Return limited results
         recently_added = data[:limit] if isinstance(data, list) else []
-        print(f"DEBUG: Fetched {len(recently_added)} recently added coins")
         return recently_added
-    except Exception as exc:
-        print(f"DEBUG: Failed to fetch recently added cryptos: {exc}")
+    except Exception:
         return []
 
 
@@ -151,11 +142,9 @@ async def get_forex_majors_summary() -> list[dict[str, Any]]:
             # Respect rate limits (5 calls/min for free tier)
             await asyncio.sleep(12)
             
-        except Exception as exc:
-            print(f"DEBUG: Failed to fetch {pair}: {exc}")
+        except Exception:
             continue
     
-    print(f"DEBUG: Fetched {len(results)} forex pairs")
     return results
 
 
@@ -209,8 +198,6 @@ async def get_comprehensive_market_summary() -> dict[str, Any]:
     - Recently added coins
     - Major forex pairs
     """
-    print("DEBUG: Fetching comprehensive market summary...")
-    
     # Fetch all data in parallel
     results = await asyncio.gather(
         get_top_cryptos_by_market_cap(limit=20),
@@ -248,7 +235,6 @@ async def get_comprehensive_market_summary() -> dict[str, Any]:
         "market_sentiment": _determine_market_sentiment(performance["average_change_24h"]),
     }
     
-    print("DEBUG: Comprehensive market summary complete")
     return summary
 
 

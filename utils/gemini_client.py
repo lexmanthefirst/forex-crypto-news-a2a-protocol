@@ -90,15 +90,19 @@ def _generate_with_gemini(prompt: str, timeout: int) -> dict[str, Any]:
         return {}
     
     try:
-        print(f"DEBUG: Attempting Gemini call with model={GEMINI_MODEL}")
         client = genai.Client(api_key=GEMINI_API_KEY)
         response = client.models.generate_content(
             model=GEMINI_MODEL,
             contents=prompt,
         )
-        print(f"DEBUG: Gemini response received")
     except Exception as exc:
-        print(f"DEBUG: Gemini call failed: {type(exc).__name__}: {exc}")
+        error_message = str(exc)
+        
+        # Check if it's a quota/rate limit error
+        if "RESOURCE_EXHAUSTED" in error_message or "429" in error_message or "quota" in error_message.lower():
+            # Return special marker to indicate quota exhaustion
+            return {"quota_exceeded": True}
+        
         return {}
 
     collected: list[str] = []
@@ -113,8 +117,7 @@ def _generate_with_gemini(prompt: str, timeout: int) -> dict[str, Any]:
                         for part in content.parts:
                             if hasattr(part, 'text'):
                                 collected.append(part.text)
-    except Exception as exc:
-        print(f"DEBUG: Failed to extract text from response: {exc}")
+    except Exception:
         return {}
 
     return _parse_model_output("".join(collected))

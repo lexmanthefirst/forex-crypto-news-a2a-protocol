@@ -99,7 +99,6 @@ async def fetch_price_history(symbol: str, days: int = 7) -> list[float]:
     if COINGECKO_API_KEY:
         params["x_cg_demo_api_key"] = COINGECKO_API_KEY
     
-    print(f"DEBUG: Fetching {days}-day price history for {symbol} (coin_id: {coin_id})...")
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.get(url, params=params, headers=headers)
@@ -108,10 +107,8 @@ async def fetch_price_history(symbol: str, days: int = 7) -> list[float]:
         
         # Extract closing prices from [timestamp, price] pairs
         prices = [price for _timestamp, price in data.get("prices", [])]
-        print(f"DEBUG: Fetched {len(prices)} price points for {symbol}")
         return prices
-    except Exception as exc:
-        print(f"DEBUG: Price history fetch failed for {symbol}: {exc}")
+    except Exception:
         return []
 
 
