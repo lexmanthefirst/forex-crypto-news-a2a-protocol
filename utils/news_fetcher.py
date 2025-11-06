@@ -9,6 +9,7 @@ from typing import Any, Iterable
 import httpx
 
 from utils.caching import redis_cache
+from utils.coingecko_helpers import search_coin_id
 
 logger = logging.getLogger(__name__)
 
@@ -68,55 +69,6 @@ def _normalize_timestamp(timestamp: str | None) -> str | None:
     return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-async def _search_coingecko_id(symbol: str) -> str | None:
-    """Search CoinGecko for a coin ID by symbol.
-    Returns the coin ID if found, otherwise returns the symbol in lowercase as fallback.
-    
-    Only accepts exact symbol matches to avoid false positives.
-    """
-    url = f"{COINGECKO_BASE}/search"
-    params = {"query": symbol}
-    
-    headers = {"Accept": "application/json"}
-    if COINGECKO_API_KEY:
-        params["x_cg_demo_api_key"] = COINGECKO_API_KEY
-    
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(url, params=params, headers=headers)
-            
-            # Check for rate limit (429)
-            if response.status_code == 429:
-                logger.error("CoinGecko rate limit exceeded (429)")
-                return symbol.lower()
-            
-            response.raise_for_status()
-            data = response.json()
-        
-        # Look for exact symbol match in coins
-        coins = data.get("coins", [])
-        for coin in coins:
-            if coin.get("symbol", "").upper() == symbol.upper():
-                coin_id = coin.get("id")
-                logger.debug(f"Found exact match: {symbol} -> {coin_id}")
-                return coin_id
-        
-        # REMOVED: Don't use first result if no exact match - this causes wrong coins!
-        # If no exact match found, log warning and fallback to lowercase
-        logger.warning(f"No exact match found for symbol '{symbol}' in CoinGecko search")
-            
-    except httpx.HTTPError as exc:
-        # Check for rate limit
-        response = getattr(exc, 'response', None)
-        if response and response.status_code == 429:
-            logger.error("CoinGecko rate limit exceeded (429)")
-        else:
-            logger.warning(f"CoinGecko search failed for '{symbol}': {exc}")
-    
-    # Fallback to lowercase symbol
-    return symbol.lower()
-
-
 @redis_cache(ttl=60)  # Cache crypto prices for 60 seconds
 async def fetch_crypto_prices(symbols: Iterable[str]) -> dict[str, float]:
     symbol_list = [symbol.upper() for symbol in symbols]
@@ -132,7 +84,10 @@ async def fetch_crypto_prices(symbols: Iterable[str]) -> dict[str, float]:
             coin_id = COIN_ID_MAP[symbol]
         else:
             # Try to find the coin ID dynamically
-            coin_id = await _search_coingecko_id(symbol)
+            coin_id = await search_coin_id(symbol)
+            if not coin_id:
+                # Fallback to lowercase if no exact match
+                coin_id = symbol.lower()
         
         coin_ids.append(coin_id)
         symbol_to_id[symbol] = coin_id

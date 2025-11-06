@@ -9,6 +9,8 @@ from typing import Any
 
 import httpx
 
+from utils.coingecko_helpers import search_coin_id
+
 # coin ID map for common cryptocurrencies
 COIN_ID_MAP = {
     "BTC": "bitcoin",
@@ -47,37 +49,6 @@ COINGECKO_BASE = os.getenv("COINGECKO_BASE", "https://api.coingecko.com/api/v3")
 COINGECKO_API_KEY = os.getenv("COINGECKO_API_KEY", "")
 
 
-async def _search_coingecko_id(symbol: str) -> str | None:
-    """Search CoinGecko for a coin ID by symbol."""
-    url = f"{COINGECKO_BASE}/search"
-    params = {"query": symbol}
-    
-    headers = {"Accept": "application/json"}
-    if COINGECKO_API_KEY:
-        params["x_cg_demo_api_key"] = COINGECKO_API_KEY
-    
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(url, params=params, headers=headers)
-            response.raise_for_status()
-            data = response.json()
-        
-        coins = data.get("coins", [])
-        for coin in coins:
-            if coin.get("symbol", "").upper() == symbol.upper():
-                coin_id = coin.get("id")
-                return coin_id
-        
-        if coins:
-            coin_id = coins[0].get("id")
-            return coin_id
-            
-    except httpx.HTTPError:
-        pass
-    
-    return symbol.lower()
-
-
 async def fetch_price_history(symbol: str, days: int = 7) -> list[float]:
     """
     Fetch historical prices for technical analysis.
@@ -90,7 +61,10 @@ async def fetch_price_history(symbol: str, days: int = 7) -> list[float]:
     if symbol_upper in COIN_ID_MAP:
         coin_id = COIN_ID_MAP[symbol_upper]
     else:
-        coin_id = await _search_coingecko_id(symbol_upper)
+        coin_id = await search_coin_id(symbol_upper)
+        if not coin_id:
+            # Fallback to lowercase if no exact match
+            coin_id = symbol.lower()
     
     url = f"{COINGECKO_BASE}/coins/{coin_id}/market_chart"
     params = {"vs_currency": "usd", "days": str(days)}
