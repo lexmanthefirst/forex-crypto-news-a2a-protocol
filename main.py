@@ -204,9 +204,13 @@ async def _process_and_push_webhook(
             config=config.model_dump(mode='json') if config else None,
         )
         
-        # Build webhook payload (direct TaskResult - no JSON-RPC wrapper)
-        # Telex webhook expects the TaskResult directly, not in JSON-RPC format
-        webhook_payload = result.model_dump(mode='json', exclude_none=False)
+        # Build webhook payload (JSON-RPC response format)
+        # Telex webhook expects JSON-RPC 2.0 response with jsonrpc, id, and result fields
+        webhook_payload = {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": result.model_dump(mode='json', exclude_none=False)
+        }
         
         # Push to Telex webhook
         headers = {
