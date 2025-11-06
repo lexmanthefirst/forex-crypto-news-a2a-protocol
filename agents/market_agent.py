@@ -300,15 +300,35 @@ class MarketAgent:
         )
 
     def _extract_pair(self, text: str) -> str | None:
+        """Extract forex pair from text.
+        
+        Matches explicit pairs like EUR/USD, EUR-USD first.
+        For 6-letter patterns like EURUSD, only accept if it looks like a valid forex pair
+        (both halves are common currency codes, not random words like LATEST).
+        """
+        # Try explicit pair format first (EUR/USD, EUR-USD)
         m = PAIR_RE.search(text)
         if m:
             a, b = m.groups()
             return f"{a.upper()}/{b.upper()}"
-        # allow "BTCUSD" or "EURUSD"
+        
+        # For 6-letter words, validate they look like currency codes
+        # Common forex currencies: USD, EUR, GBP, JPY, AUD, CAD, CHF, NZD, CNY, etc.
+        valid_currencies = {
+            "USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD", 
+            "CNY", "SEK", "NOK", "DKK", "SGD", "HKD", "KRW", "INR",
+            "MXN", "ZAR", "TRY", "BRL", "RUB", "PLN", "THB", "MYR"
+        }
+        
         m2 = re.search(r"\b([A-Za-z]{6})\b", text)
         if m2:
-            s = m2.group(1)
-            return f"{s[:3].upper()}/{s[3:].upper()}"
+            s = m2.group(1).upper()
+            first_half = s[:3]
+            second_half = s[3:]
+            # Only treat as forex pair if both parts are known currency codes
+            if first_half in valid_currencies and second_half in valid_currencies:
+                return f"{first_half}/{second_half}"
+        
         return None
 
     def _extract_symbol(self, text: str) -> str | None:
@@ -321,15 +341,25 @@ class MarketAgent:
         
         Returns the CoinGecko ID (e.g., "bitcoin") for compatibility with price APIs.
         """
-        # First try direct regex match for crypto symbols
+        # First, try to match known cryptocurrency names/symbols using the alias system
+        # This prioritizes real coins over generic word matches
+        words = re.findall(r'\b[a-zA-Z]{2,}\b', text)
+        for word in words:
+            coin_id = resolve_coin_alias(word)
+            if coin_id:
+                return coin_id
+        
+        # Fallback: Try direct regex match for crypto symbols
+        # But exclude common English words and question words
         m = SYMBOL_RE.search(text.upper())
         if m:
             symbol = m.group(1).upper()
-            # Filter out common English words that might match
+            # Extended exclusion list: common words + words that appear in queries
             excluded_words = {
                 "TO", "THE", "AND", "OR", "FOR", "IN", "ON", "AT", "BY", "IS", "ARE", "WAS", "IT",
                 "WHAT", "WHEN", "WHERE", "WHO", "WHY", "HOW", "CAN", "WILL", "WITH", "FROM",
-                "THIS", "THAT", "HAVE", "HAS", "HAD", "NOT", "BUT", "BEEN", "ABOUT", "INTO"
+                "THIS", "THAT", "HAVE", "HAS", "HAD", "NOT", "BUT", "BEEN", "ABOUT", "INTO",
+                "NEWS", "LATEST", "UPDATE", "PRICE", "ANALYSIS", "MARKET", "TELL", "SHOW", "GET"
             }
             if symbol not in excluded_words:
                 # Try to resolve the symbol to a CoinGecko ID
@@ -339,15 +369,7 @@ class MarketAgent:
                 # Fallback to original symbol if no alias found
                 return symbol
         
-        # Try to match common cryptocurrency names directly in text
-        # Split text into words and try each word
-        words = re.findall(r'\b[a-zA-Z]{3,}\b', text)
-        for word in words:
-            coin_id = resolve_coin_alias(word)
-            if coin_id:
-                return coin_id
-        
-        # Fallback: Try the legacy crypto_map for backward compatibility
+        # Legacy fallback for backward compatibility
         crypto_map = {
             "bitcoin": "bitcoin",
             "ethereum": "ethereum",
