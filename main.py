@@ -1,17 +1,12 @@
 """
-A2A Market Intelligence Agent - Main Application (BLOCKING MODE ONLY)
+A2A Market Intelligence Agent - Main Application
 
-This FastAPI application provides a JSON-RPC 2.0 endpoint for market analysis
+FastAPI application providing JSON-RPC 2.0 endpoint for market analysis
 of cryptocurrencies and forex pairs using the Agent-to-Agent (A2A) protocol.
-
-SIMPLIFIED IMPLEMENTATION:
-- Only supports blocking/synchronous mode
-- Non-blocking webhook code has been commented out
-- See main_original_with_blocking_nonblocking.py for full implementation
 
 Architecture:
 - Request parsing & validation layer
-- Synchronous request handling (blocking mode only)
+- Synchronous request handling
 - Background scheduled analysis jobs
 - Market intelligence agent integration
 - Redis session storage
@@ -68,7 +63,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Create routers for organized endpoint management
 a2a_router = APIRouter(prefix="/a2a/agent", tags=["A2A Protocol"])
 system_router = APIRouter(tags=["System"])
 
@@ -125,7 +119,7 @@ async def _scheduled_analysis_job() -> None:
 
 # Request Parsing & Validation
 async def _parse_request_body(request: Request) -> dict[str, Any] | JSONResponse:
-    """Parse incoming request body."""
+    """Parse and validate request body JSON."""
     try:
         body = await request.json()
         return body
@@ -140,12 +134,11 @@ async def _parse_request_body(request: Request) -> dict[str, Any] | JSONResponse
 
 
 async def _validate_jsonrpc_request(body: dict[str, Any], lenient: bool = False) -> JSONRPCRequest | JSONResponse:
-    """
-    Validate JSON-RPC request structure.
+    """Validate JSON-RPC 2.0 request structure.
     
     Args:
-        body: Request body
-        lenient: If True, returns error as JSON-RPC response (HTTP 200) instead of HTTP 400
+        body: Request body dictionary
+        lenient: Return errors as HTTP 200 with JSON-RPC error instead of HTTP 4xx
     """
     try:
         rpc = JSONRPCRequest(**body)
@@ -154,7 +147,6 @@ async def _validate_jsonrpc_request(body: dict[str, Any], lenient: bool = False)
         request_id = body.get("id") if isinstance(body, dict) else None
         
         if lenient:
-            # Return error as successful JSON-RPC response (HTTP 200)
             error_payload = {
                 "jsonrpc": "2.0",
                 "id": request_id,
@@ -166,7 +158,6 @@ async def _validate_jsonrpc_request(body: dict[str, Any], lenient: bool = False)
             }
             return JSONResponse(status_code=200, content=error_payload)
         else:
-            # Return HTTP error
             error_response = create_error_response(
                 request_id=request_id,
                 code=A2AErrorCode.INVALID_REQUEST,
@@ -189,9 +180,7 @@ def _create_internal_error_response(request_id: str, exc: Exception) -> JSONResp
 
 
 
-# Request Handlers (BLOCKING MODE ONLY)
-# Note: Non-blocking webhook implementation has been commented out
-# See main_original_with_blocking_nonblocking.py for the full version
+# Request Handlers
 
 # async def _process_and_push_webhook(
 #     messages: list[A2AMessage],
@@ -247,27 +236,26 @@ def _create_internal_error_response(request_id: str, exc: Exception) -> JSONResp
 
 
 async def _handle_message_send(request_id: str, params: MessageParams) -> JSONResponse:
-    """Handle message/send JSON-RPC method (BLOCKING MODE ONLY).
+    """Handle message/send JSON-RPC method.
     
-    This simplified version only supports blocking/synchronous mode:
-    - Process the request immediately
-    - Return the completed result
-    
-    Note: Non-blocking webhook code has been removed for simplification.
-    See main_original_with_blocking_nonblocking.py for the full implementation.
+    Processes messages synchronously and returns completed result.
     """
-    messages = [params.message]
-    config = params.configuration
+    # Validate messages
+    if not params.messages or len(params.messages) == 0:
+        raise ValueError("At least one message is required")
     
-    # Log incoming message details
-    user_message = messages[0] if messages else None
+    user_message = params.messages[0] if params.messages else None
     if user_message and user_message.parts:
         text_preview = next((p.text[:50] for p in user_message.parts if p.text), "")
         logger.info("[message/send] Processing message: text=%r...", text_preview)
     
-    # Blocking mode: process synchronously and return complete result
-    logger.info("[message/send] Processing synchronously (blocking mode)")
-    result = await _process_with_agent(messages, config=config)
+    logger.info("[message/send] Processing synchronously")
+    result = await _process_with_agent(
+        params.messages,
+        context_id=params.contextId,
+        task_id=params.taskId,
+        config=params.config
+    )
     logger.info("[message/send] Processing complete: status=%s", result.status.state)
     
     response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
@@ -276,10 +264,14 @@ async def _handle_message_send(request_id: str, params: MessageParams) -> JSONRe
 
 async def _handle_execute(request_id: str, params: ExecuteParams) -> JSONResponse:
     """Handle execute JSON-RPC method."""
+    if not params.messages or len(params.messages) == 0:
+        raise ValueError("At least one message is required")
+    
     result = await _process_with_agent(
         params.messages,
         context_id=params.contextId,
         task_id=params.taskId,
+        config=params.configuration
     )
     response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
     return JSONResponse(content=response.model_dump(mode='json', by_alias=True, exclude_none=True))
@@ -289,29 +281,23 @@ async def _handle_execute(request_id: str, params: ExecuteParams) -> JSONRespons
 # A2A Protocol Routes
 @a2a_router.post("/market")
 async def a2a_endpoint(request: Request):
-    """Main A2A protocol endpoint for market analysis requests.
+    """Main A2A protocol endpoint for market analysis.
     
-    Handles JSON-RPC 2.0 requests with methods:
-    - message/send: Process user message and return analysis
-    - execute: Execute analysis task
+    Handles JSON-RPC 2.0 methods: message/send, execute
     """
-    # Parse and validate request
     body_result = await _parse_request_body(request)
     if isinstance(body_result, JSONResponse):
         logger.error("[a2a] Request parsing failed")
         return body_result
     
-    # Log incoming request
     logger.info("[a2a] Incoming request: method=%s id=%s", 
                body_result.get("method"), body_result.get("id"))
     
-    # Use lenient validation (returns HTTP 200 even for errors)
     rpc = await _validate_jsonrpc_request(body_result, lenient=True)
     if isinstance(rpc, JSONResponse):
         logger.error("[a2a] JSON-RPC validation failed")
         return rpc
     
-    # Process the request
     try:
         params = rpc.params
         response = None
@@ -325,17 +311,14 @@ async def a2a_endpoint(request: Request):
         else:
             raise ValueError(f"Unsupported params type: {type(params)}")
         
-        # Log successful response
         if response:
             logger.info("[a2a] Response sent: id=%s status=success", rpc.id)
         
         return response
             
     except Exception as exc:
-        # Log error with full traceback
         logger.error("[a2a] Unhandled error: %s", exc, exc_info=True)
         
-        # Return error as JSON-RPC error response (HTTP 200)
         error_payload = {
             "jsonrpc": "2.0",
             "id": rpc.id,
@@ -366,11 +349,7 @@ async def health_check():
 @system_router.get("/agent.json")
 @system_router.get("/.well-known/agent.json")
 async def agent_manifest():
-    """Agent manifest/discovery endpoint for A2A protocol.
-    
-    Returns agent metadata, capabilities, and endpoint information
-    for agent discovery and integration.
-    """
+    """Agent manifest for A2A protocol discovery."""
     return {
         "name": "Market Intelligence Agent",
         "version": "1.0.0",
@@ -439,13 +418,8 @@ async def agent_manifest():
 
 
 
-# Register Routers
 app.include_router(a2a_router)
 app.include_router(system_router)
-
-
-
-# Main Entry Point
 if __name__ == "__main__":
     import uvicorn
 
@@ -475,4 +449,10 @@ async def _process_with_agent(
         config=processed_config,
     )
 
+
+if __name__ == "__main__":
+    import uvicorn
+
+    port = int(os.getenv("PORT", "8000"))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
 

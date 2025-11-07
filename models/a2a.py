@@ -43,9 +43,11 @@ class MessageConfiguration(BaseModel):
 
 
 class MessageParams(BaseModel):
-    """Parameters for message/send method."""
-    message: A2AMessage
-    configuration: MessageConfiguration = Field(default_factory=MessageConfiguration)
+    """Parameters for message/send method (Telex-compatible)."""
+    messages: List[A2AMessage]  # Note: PLURAL, it's a list
+    contextId: Optional[str] = None
+    taskId: Optional[str] = None
+    config: Optional[Dict[str, Any]] = Field(default=None, alias="configuration")
 
 
 class ExecuteParams(BaseModel):
@@ -53,6 +55,7 @@ class ExecuteParams(BaseModel):
     contextId: Optional[str] = None
     taskId: Optional[str] = None
     messages: List[A2AMessage]
+    configuration: Optional[Dict[str, Any]] = None
 
 
 class JSONRPCRequest(BaseModel):
