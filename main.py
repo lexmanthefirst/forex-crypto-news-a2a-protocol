@@ -243,7 +243,7 @@ async def _handle_message_send(request_id: str, params: MessageParams) -> JSONRe
         logger.info("[message/send] Processing message: text=%r...", text_preview)
     
     # Check if non-blocking mode is requested
-    is_blocking = True
+    is_blocking = False
     push_config = None
     
     if config:
