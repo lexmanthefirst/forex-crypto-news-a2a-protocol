@@ -1,12 +1,17 @@
 """
-A2A Market Intelligence Agent - Main Application
+A2A Market Intelligence Agent - Main Application (BLOCKING MODE ONLY)
 
 This FastAPI application provides a JSON-RPC 2.0 endpoint for market analysis
 of cryptocurrencies and forex pairs using the Agent-to-Agent (A2A) protocol.
 
+SIMPLIFIED IMPLEMENTATION:
+- Only supports blocking/synchronous mode
+- Non-blocking webhook code has been commented out
+- See main_original_with_blocking_nonblocking.py for full implementation
+
 Architecture:
 - Request parsing & validation layer
-- Synchronous request handling (blocking mode)
+- Synchronous request handling (blocking mode only)
 - Background scheduled analysis jobs
 - Market intelligence agent integration
 - Redis session storage
@@ -184,66 +189,72 @@ def _create_internal_error_response(request_id: str, exc: Exception) -> JSONResp
 
 
 
-# Request Handlers
-async def _process_and_push_webhook(
-    messages: list[A2AMessage],
-    task_id: str,
-    context_id: str,
-    request_id: str,
-    config: MessageConfiguration | None,
-    push_url: str,
-    push_token: str,
-) -> None:
-    """Process messages in background and push result to Telex webhook.
-    
-    This implements the non-blocking A2A pattern from the blog example.
-    """
-    try:
-        # Process with agent
-        result = await _process_with_agent(
-            messages,
-            context_id=context_id,
-            task_id=task_id,
-            config=config.model_dump(mode='json', by_alias=True) if config else None,
-        )
-        
-        # Build webhook payload - send full TaskResult with proper serialization
-        webhook_payload = result.model_dump(mode='json', by_alias=True, exclude_none=True)
-        
-        # Log webhook attempt
-        logger.info("[webhook] Sending to %s (task_id=%s, status=%s)", 
-                   push_url, task_id, result.status.state)
-        logger.debug("[webhook] Payload preview: %s", json.dumps(webhook_payload, indent=2)[:300])
-        
-        # Send webhook notification (blog's method)
-        headers = {"Content-Type": "application/json"}
-        
-        if push_token:
-            headers["Authorization"] = f"Bearer {push_token}"
-        
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                push_url,
-                json=webhook_payload,
-                headers=headers
-            )
-            response.raise_for_status()
-            logger.info("[webhook] ✓ Delivered successfully: status=%s task_id=%s", 
-                       response.status_code, task_id)
-            
-    except httpx.HTTPStatusError as e:
-        logger.error("[webhook] ✗ HTTP error %s: %s (task_id=%s)", 
-                    e.response.status_code, e.response.text[:200], task_id)
-    except Exception as e:
-        logger.error("[webhook] ✗ Failed: %s (task_id=%s)", e, task_id, exc_info=True)
+# Request Handlers (BLOCKING MODE ONLY)
+# Note: Non-blocking webhook implementation has been commented out
+# See main_original_with_blocking_nonblocking.py for the full version
+
+# async def _process_and_push_webhook(
+#     messages: list[A2AMessage],
+#     task_id: str,
+#     context_id: str,
+#     request_id: str,
+#     config: MessageConfiguration | None,
+#     push_url: str,
+#     push_token: str,
+# ) -> None:
+#     """Process messages in background and push result to Telex webhook.
+#     
+#     This implements the non-blocking A2A pattern from the blog example.
+#     """
+#     try:
+#         # Process with agent
+#         result = await _process_with_agent(
+#             messages,
+#             context_id=context_id,
+#             task_id=task_id,
+#             config=config.model_dump(mode='json', by_alias=True) if config else None,
+#         )
+#         
+#         # Build webhook payload - send full TaskResult with proper serialization
+#         webhook_payload = result.model_dump(mode='json', by_alias=True, exclude_none=True)
+#         
+#         # Log webhook attempt
+#         logger.info("[webhook] Sending to %s (task_id=%s, status=%s)", 
+#                    push_url, task_id, result.status.state)
+#         logger.debug("[webhook] Payload preview: %s", json.dumps(webhook_payload, indent=2)[:300])
+#         
+#         # Send webhook notification (blog's method)
+#         headers = {"Content-Type": "application/json"}
+#         
+#         if push_token:
+#             headers["Authorization"] = f"Bearer {push_token}"
+#         
+#         async with httpx.AsyncClient(timeout=60.0) as client:
+#             response = await client.post(
+#                 push_url,
+#                 json=webhook_payload,
+#                 headers=headers
+#             )
+#             response.raise_for_status()
+#             logger.info("[webhook] ✓ Delivered successfully: status=%s task_id=%s", 
+#                        response.status_code, task_id)
+#             
+#     except httpx.HTTPStatusError as e:
+#         logger.error("[webhook] ✗ HTTP error %s: %s (task_id=%s)", 
+#                     e.response.status_code, e.response.text[:200], task_id)
+#     except Exception as e:
+#         logger.error("[webhook] ✗ Failed: %s (task_id=%s)", e, task_id, exc_info=True)
 
 
 async def _handle_message_send(request_id: str, params: MessageParams) -> JSONResponse:
-    """Handle message/send JSON-RPC method.
+    """Handle message/send JSON-RPC method (BLOCKING MODE ONLY).
     
-    Supports both blocking and non-blocking modes:
-    - Blocking: Process and return completed result immediately
-    - Non-blocking: Return 'accepted' status, process in background, push to webhook
+    This simplified version only supports blocking/synchronous mode:
+    - Process the request immediately
+    - Return the completed result
+    
+    Note: Non-blocking webhook code has been removed for simplification.
+    See main_original_with_blocking_nonblocking.py for the full implementation.
     """
     messages = [params.message]
     config = params.configuration
@@ -254,62 +265,11 @@ async def _handle_message_send(request_id: str, params: MessageParams) -> JSONRe
         text_preview = next((p.text[:50] for p in user_message.parts if p.text), "")
         logger.info("[message/send] Processing message: text=%r...", text_preview)
     
-    # Check if non-blocking mode is requested
-    is_blocking = True  # Default to blocking mode
-    push_config = None
-    
-    if config:
-        # Check blocking flag (default to True if not specified)
-        is_blocking = config.blocking if hasattr(config, 'blocking') and config.blocking is not None else True
-        push_config = config.pushNotificationConfig if hasattr(config, 'pushNotificationConfig') else None
-    
-    logger.info("[message/send] Mode: %s, webhook_configured: %s", 
-               "blocking" if is_blocking else "non-blocking",
-               bool(push_config and push_config.url))
-    
-    # Non-blocking mode: return accepted, process in background
-    if not is_blocking and push_config and push_config.url and push_config.token:
-        task_id = str(uuid.uuid4())
-        context_id = str(uuid.uuid4())
-        
-        logger.info("[message/send] Non-blocking: returning 'working' (task_id=%s)", task_id)
-        
-        # Return accepted status immediately
-        accepted_result = TaskResult(
-            taskId=task_id,
-            contextId=context_id,
-            status=TaskStatus(
-                state="working",
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                message=A2AMessage(
-                    role="agent",
-                    parts=[MessagePart(kind="text", text="🔄 Analyzing your request! Results coming shortly...")],
-                ),
-            ),
-            artifacts=[],
-            history=messages,
-            kind="task"
-        )
-        
-        # Start background processing
-        asyncio.create_task(_process_and_push_webhook(
-            messages=messages,
-            task_id=task_id,
-            context_id=context_id,
-            request_id=request_id,
-            config=config,
-            push_url=push_config.url,
-            push_token=push_config.token
-        ))
-        
-        response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=accepted_result)
-        logger.info("[message/send] Accepted response sent (task_id=%s)", task_id)
-        return JSONResponse(content=response.model_dump(mode='json', by_alias=True, exclude_none=True))
-    
     # Blocking mode: process synchronously and return complete result
-    logger.info("[message/send] Blocking: processing synchronously")
+    logger.info("[message/send] Processing synchronously (blocking mode)")
     result = await _process_with_agent(messages, config=config)
     logger.info("[message/send] Processing complete: status=%s", result.status.state)
+    
     response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
     return JSONResponse(content=response.model_dump(mode='json', by_alias=True, exclude_none=True))
 
@@ -423,7 +383,7 @@ async def agent_manifest():
             "News aggregation from multiple sources",
             "AI-powered market analysis and insights",
             "Redis caching for performance (60s prices, 300s news)",
-            "Supports both blocking and non-blocking modes"
+            "Blocking/synchronous mode only (simplified implementation)"
         ],
         "endpoints": [
             {
@@ -469,8 +429,8 @@ async def agent_manifest():
             "version": "A2A/1.0",
             "jsonrpc": "2.0",
             "blocking_mode": True,
-            "non_blocking_mode": True,
-            "webhook_support": True
+            "non_blocking_mode": False,
+            "webhook_support": False
         },
         "contact": {
             "support": "github.com/lexmanthefirst/forex-crypto-news-a2a-protocol"
