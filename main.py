@@ -335,29 +335,15 @@ async def a2a_endpoint(request: Request):
     - message/send: Process user message and return analysis
     - execute: Execute analysis task
     """
-    # Log incoming request
-    try:
-        body = await request.json()
-        logger.info("[a2a] Incoming request: method=%s id=%s", 
-                   body.get("method"), body.get("id"))
-    except Exception as e:
-        logger.error("[a2a] Failed to parse request body: %s", e)
-        error_response = {
-            "jsonrpc": "2.0",
-            "id": None,
-            "error": {
-                "code": A2AErrorCode.PARSE_ERROR.value,
-                "message": "Parse error",
-                "data": {"details": str(e)}
-            }
-        }
-        return JSONResponse(status_code=200, content=error_response)
-    
     # Parse and validate request
     body_result = await _parse_request_body(request)
     if isinstance(body_result, JSONResponse):
         logger.error("[a2a] Request parsing failed")
         return body_result
+    
+    # Log incoming request
+    logger.info("[a2a] Incoming request: method=%s id=%s", 
+               body_result.get("method"), body_result.get("id"))
     
     # Use lenient validation (returns HTTP 200 even for errors)
     rpc = await _validate_jsonrpc_request(body_result, lenient=True)
