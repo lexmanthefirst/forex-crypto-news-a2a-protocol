@@ -13,7 +13,7 @@ try:  # pragma: no cover - optional dependency
 except Exception:  # pragma: no cover - gracefully handle missing package
     genai = None  # type: ignore
 
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 

@@ -352,14 +352,19 @@ class MarketAgent:
         # Try LLM-based extraction first (most accurate)
         coin_query = extract_coin_with_llm(text)
         if coin_query:
-            # Try to resolve to CoinGecko ID
-            coin_id = resolve_coin_alias(coin_query)
-            if coin_id:
-                logger.info(f"[LLM] Extracted '{coin_query}' -> resolved to '{coin_id}'")
-                return coin_id
-            # If not in alias map, use as-is (lowercase)
-            logger.info(f"[LLM] Extracted '{coin_query}' (no alias, using lowercase)")
-            return coin_query.lower()
+            # Filter out garbage responses (placeholders, weird patterns)
+            if "TICKER" in coin_query.upper() or len(coin_query) > 20 or "-" in coin_query:
+                logger.warning(f"[LLM] Invalid extraction '{coin_query}', falling back to regex")
+                coin_query = None  # Force fallback
+            else:
+                # Try to resolve to CoinGecko ID
+                coin_id = resolve_coin_alias(coin_query)
+                if coin_id:
+                    logger.info(f"[LLM] Extracted '{coin_query}' -> resolved to '{coin_id}'")
+                    return coin_id
+                # If not in alias map, use as-is (lowercase)
+                logger.info(f"[LLM] Extracted '{coin_query}' (no alias, using lowercase)")
+                return coin_query.lower()
         
         # Fallback to legacy crypto_map for common coins
         crypto_map = {
