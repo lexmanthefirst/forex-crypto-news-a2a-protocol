@@ -198,32 +198,44 @@ async def _process_and_push_webhook(
     
     This implements the non-blocking A2A pattern from the blog example.
     """
-    # Process with agent
-    result = await _process_with_agent(
-        messages,
-        context_id=context_id,
-        task_id=task_id,
-        config=config.model_dump(mode='json', by_alias=True) if config else None,
-    )
-    
-    # Log webhook attempt
-    logger.info("[webhook] Sending to %s (task_id=%s, status=%s)", 
-               push_url, task_id, result.status.status)
-    
-    # Send webhook notification (blog's method)
-    headers = {"Content-Type": "application/json"}
-    
-    if push_token:
-        headers["Authorization"] = f"Bearer {push_token}"
-    
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        response = await client.post(
-            push_url,
-            json=result.model_dump(),
-            headers=headers
+    try:
+        # Process with agent
+        result = await _process_with_agent(
+            messages,
+            context_id=context_id,
+            task_id=task_id,
+            config=config.model_dump(mode='json', by_alias=True) if config else None,
         )
-        logger.info("[webhook] Response: status=%s task_id=%s", 
-                   response.status_code, task_id)
+        
+        # Build webhook payload - send full TaskResult with proper serialization
+        webhook_payload = result.model_dump(mode='json', by_alias=True, exclude_none=True)
+        
+        # Log webhook attempt
+        logger.info("[webhook] Sending to %s (task_id=%s, status=%s)", 
+                   push_url, task_id, result.status.status)
+        logger.debug("[webhook] Payload preview: %s", json.dumps(webhook_payload, indent=2)[:300])
+        
+        # Send webhook notification (blog's method)
+        headers = {"Content-Type": "application/json"}
+        
+        if push_token:
+            headers["Authorization"] = f"Bearer {push_token}"
+        
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                push_url,
+                json=webhook_payload,
+                headers=headers
+            )
+            response.raise_for_status()
+            logger.info("[webhook] ✓ Delivered successfully: status=%s task_id=%s", 
+                       response.status_code, task_id)
+            
+    except httpx.HTTPStatusError as e:
+        logger.error("[webhook] ✗ HTTP error %s: %s (task_id=%s)", 
+                    e.response.status_code, e.response.text[:200], task_id)
+    except Exception as e:
+        logger.error("[webhook] ✗ Failed: %s (task_id=%s)", e, task_id, exc_info=True)
 
 
 async def _handle_message_send(request_id: str, params: MessageParams) -> JSONResponse:
