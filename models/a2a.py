@@ -65,7 +65,7 @@ class JSONRPCRequest(BaseModel):
 
 class TaskStatus(BaseModel):
     """Task status information."""
-    status: Literal["working", "completed", "input-required", "failed"]
+    state: Literal["working", "completed", "input-required", "failed"]
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     message: Optional[A2AMessage] = None
 
@@ -79,7 +79,7 @@ class Artifact(BaseModel):
 
 class TaskResult(BaseModel):
     """Result of a task execution."""
-    id: str
+    taskId: str
     contextId: str
     status: TaskStatus
     artifacts: List[Artifact] = []

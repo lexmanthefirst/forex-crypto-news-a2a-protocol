@@ -212,7 +212,7 @@ async def _process_and_push_webhook(
         
         # Log webhook attempt
         logger.info("[webhook] Sending to %s (task_id=%s, status=%s)", 
-                   push_url, task_id, result.status.status)
+                   push_url, task_id, result.status.state)
         logger.debug("[webhook] Payload preview: %s", json.dumps(webhook_payload, indent=2)[:300])
         
         # Send webhook notification (blog's method)
@@ -276,10 +276,10 @@ async def _handle_message_send(request_id: str, params: MessageParams) -> JSONRe
         
         # Return accepted status immediately
         accepted_result = TaskResult(
-            id=task_id,
+            taskId=task_id,
             contextId=context_id,
             status=TaskStatus(
-                status="working",
+                state="working",
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 message=A2AMessage(
                     role="agent",
@@ -309,7 +309,7 @@ async def _handle_message_send(request_id: str, params: MessageParams) -> JSONRe
     # Blocking mode: process synchronously and return complete result
     logger.info("[message/send] Blocking: processing synchronously")
     result = await _process_with_agent(messages, config=config)
-    logger.info("[message/send] Processing complete: status=%s", result.status.status)
+    logger.info("[message/send] Processing complete: status=%s", result.status.state)
     response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
     return JSONResponse(content=response.model_dump(mode='json', by_alias=True, exclude_none=True))
 

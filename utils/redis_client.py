@@ -49,7 +49,7 @@ class RedisClient:
 
     # Task helpers
     async def set_task(self, task: TaskResult, ex: int | None = 3600) -> None:
-        await self.client.set(f"tasks:{task.id}", task.model_dump_json(), ex=ex)
+        await self.client.set(f"tasks:{task.taskId}", task.model_dump_json(), ex=ex)
 
     async def get_task(self, task_id: str) -> TaskResult | None:
         raw = await self.client.get(f"tasks:{task_id}")
