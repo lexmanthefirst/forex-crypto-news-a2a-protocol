@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
 from models.a2a import A2AMessage, Artifact, MessagePart, TaskResult, TaskStatus
+
+logger = logging.getLogger(__name__)
 
 try:  # pragma: no cover - optional dependency
     from google import genai  # type: ignore
@@ -15,6 +18,9 @@ except Exception:  # pragma: no cover - gracefully handle missing package
 
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+# Log which model is being used at startup
+logger.info(f"Gemini client initialized with model: {GEMINI_MODEL}")
 
 
 def _utc_now() -> str:
