@@ -208,11 +208,7 @@ async def _process_and_push_webhook(
         )
         
         # Build webhook payload
-        webhook_payload = {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "result": result.status.model_dump(mode='json', by_alias=True, exclude_none=True)
-        }
+        webhook_payload = result.model_dump(mode='json', by_alias=True, exclude_none=True)
         
         # Log webhook attempt with full payload for debugging
         logger.info("[webhook] Sending to %s (task_id=%s, status=%s)", 
