@@ -314,7 +314,29 @@ class MarketAgent:
         For 6-letter patterns like EURUSD, only accept if it looks like a valid forex pair
         (both halves are common currency codes, not random words like LATEST).
         """
-        # Try explicit pair format first (EUR/USD, EUR-USD)
+        # Check for natural language forex pair names first
+        text_lower = text.lower()
+        natural_language_pairs = {
+            "euro dollar": "EUR/USD",
+            "euro usd": "EUR/USD",
+            "pound dollar": "GBP/USD",
+            "pound usd": "GBP/USD",
+            "dollar yen": "USD/JPY",
+            "usd yen": "USD/JPY",
+            "aussie dollar": "AUD/USD",
+            "aud usd": "AUD/USD",
+            "euro pound": "EUR/GBP",
+            "euro yen": "EUR/JPY",
+            "dollar cad": "USD/CAD",
+            "dollar canadian": "USD/CAD",
+        }
+        
+        for phrase, pair in natural_language_pairs.items():
+            if phrase in text_lower:
+                logger.info(f"[Natural language] Matched '{phrase}' -> '{pair}'")
+                return pair
+        
+        # Try explicit pair format (EUR/USD, EUR-USD)
         m = PAIR_RE.search(text)
         if m:
             a, b = m.groups()
