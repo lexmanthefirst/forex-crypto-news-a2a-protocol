@@ -138,27 +138,59 @@ class MarketAgent:
         pair = self._extract_pair(text)
         symbol = self._extract_symbol(text)
 
+        # Parallel fetch all data to reduce latency
+        fetch_tasks = []
+        
+        if pair:
+            fetch_tasks.append(("forex", fetch_forex_rate(pair)))
+        
+        if symbol:
+            fetch_tasks.append(("crypto_price", fetch_crypto_prices([symbol])))
+            fetch_tasks.append(("technical", get_technical_summary(symbol)))
+        
+        # Always fetch news in parallel
+        fetch_tasks.append(("news", fetch_combined_news(limit=5)))  # Reduced from 10 to 5
+        
+        # Execute all fetches in parallel
+        results = {}
+        if fetch_tasks:
+            task_results = await asyncio.gather(
+                *[task for _, task in fetch_tasks],
+                return_exceptions=True
+            )
+            for i, (name, _) in enumerate(fetch_tasks):
+                results[name] = task_results[i]
+        
+        # Process results
         price_snapshot: dict[str, Any] = {}
         technical_data: dict[str, Any] = {}
         error_messages: list[str] = []
         
-        if pair:
-            try:
-                forex = await fetch_forex_rate(pair)
-                price_snapshot["pair"] = forex
-            except Exception as e:
+        if pair and "forex" in results:
+            result = results["forex"]
+            if isinstance(result, Exception):
                 price_snapshot["pair"] = {"pair": pair, "rate": None}
-                error_messages.append(f"Unable to fetch forex rate for {pair}. The API may be unavailable or the pair may not be supported.")
+                error_messages.append(f"Unable to fetch forex rate for {pair}.")
+            else:
+                price_snapshot["pair"] = result
+                
         if symbol:
-            try:
-                prices = await fetch_crypto_prices([symbol])
-                price_snapshot["crypto"] = prices
-                technical_data = await get_technical_summary(symbol)
-            except Exception as e:
-                price_snapshot["crypto"] = {symbol: None}
-                error_messages.append(f"Unable to fetch price data for {symbol}. Please verify the coin name/symbol is correct.")
+            if "crypto_price" in results:
+                result = results["crypto_price"]
+                if isinstance(result, Exception):
+                    price_snapshot["crypto"] = {symbol: None}
+                    error_messages.append(f"Unable to fetch price data for {symbol}.")
+                else:
+                    price_snapshot["crypto"] = result
+                    
+            if "technical" in results:
+                result = results["technical"]
+                if not isinstance(result, Exception):
+                    technical_data = result
 
-        combined_news = await fetch_combined_news(limit=10)
+        combined_news = results.get("news", [])
+        if isinstance(combined_news, Exception):
+            combined_news = []
         relevant = self._filter_relevant_news(combined_news, pair, symbol)
         news_summary = (
             "\n".join(f"• {item.get('title')} ({item.get('source')})" for item in relevant[:5])
@@ -177,20 +209,39 @@ class MarketAgent:
 
         loop = asyncio.get_running_loop()
         subject = pair or symbol or "market"
-        analysis_result = await loop.run_in_executor(None, analyze_sync, subject, price_snapshot, news_summary)
-
-        analysis_data = self._extract_analysis_data(analysis_result)
-        raw_analysis = analysis_data.get("analysis", {})
-        analysis = dict(raw_analysis) if isinstance(raw_analysis, dict) else {}
-        analysis_ts = analysis_data.get("timestamp") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        analysis["ts"] = analysis_ts
+        
+        # Add timeout to prevent hanging on slow LLM responses
+        try:
+            analysis_result = await asyncio.wait_for(
+                loop.run_in_executor(None, analyze_sync, subject, price_snapshot, news_summary),
+                timeout=25.0  # 25 second max for LLM analysis
+            )
+            analysis_data = self._extract_analysis_data(analysis_result)
+            raw_analysis = analysis_data.get("analysis", {})
+            analysis = dict(raw_analysis) if isinstance(raw_analysis, dict) else {}
+            analysis_ts = analysis_data.get("timestamp") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            analysis["ts"] = analysis_ts
+        except asyncio.TimeoutError:
+            logger.warning(f"Gemini analysis timed out for {subject}")
+            # Fallback to basic analysis without LLM
+            analysis = {
+                "direction": "neutral",
+                "confidence": 0.5,
+                "impact_score": 0.0,
+                "reasoning": ["Analysis timed out - using fallback"],
+                "timeframe": "short-term",
+                "ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            }
 
         key = (pair or symbol or "market").upper()
-        await redis_store.set_latest_analysis(
-            key,
-            {"analysis": analysis, "news": relevant, "price_snapshot": price_snapshot},
-            ex=3600,
-        )
+        try:
+            await redis_store.set_latest_analysis(
+                key,
+                {"analysis": analysis, "news": relevant, "price_snapshot": price_snapshot},
+                ex=3600,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to store analysis in Redis: {e}")
 
         impact = float(analysis.get("impact_score", 0.0) or 0.0)
         if self.enable_notifications and abs(impact) >= float(os.getenv("ANALYSIS_IMPACT_THRESHOLD", "0.5")):
