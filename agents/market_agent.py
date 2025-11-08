@@ -529,17 +529,11 @@ class MarketAgent:
         incoming_messages: list[A2AMessage],
         agent_message: A2AMessage
     ) -> list[A2AMessage]:
-        """Build conversation history with user message and agent response.
-
-        Per working Telex agent logs, the history array should contain:
-        1. The last user message (cleaned text only, no metadata/data parts)
-        2. The agent's response message
-        
-        Reference: hng-stage3-task working agent shows history: [user_msg, agent_msg]
+        """Build conversation history.
         """
         history = []
         
-        # Add cleaned user message (text only, no complex data parts)
+        # Add ONLY cleaned user message (text only, no complex data parts)
         if incoming_messages:
             last_user_msg = incoming_messages[-1]
             # Extract just the text from the user message
@@ -554,9 +548,6 @@ class MarketAgent:
                 metadata=None
             )
             history.append(clean_user_msg)
-        
-        # Add agent response
-        history.append(agent_message)
         
         return history
 
@@ -680,9 +671,8 @@ class MarketAgent:
         symbol: str | None = None,
         error_messages: list[str] | None = None,
     ) -> str:
-        """Format analysis results as a user-friendly Markdown message with error handling."""
+        """Format comprehensive analysis as user-friendly Markdown with all data sections."""
         
-        # Build message sections
         sections = []
         
         # Header
@@ -693,51 +683,81 @@ class MarketAgent:
             sections.append("⚠️ **Notices:**")
             for error in error_messages:
                 sections.append(f"- {error}")
-            sections.append("")  # Add blank line
+            sections.append("")
         
-        # Outlook
-        sections.append(f"**Outlook:** {direction.capitalize()} (Confidence: {confidence:.0%})")
+        # === MARKET OUTLOOK ===
+        sections.append("**📊 Market Outlook**")
+        sections.append(f"- **Direction:** {direction.capitalize()}")
+        sections.append(f"- **Confidence Level:** {confidence:.0%}")
+        sections.append("")
         
-        # Price information
+        # === PRICE DATA ===
+        sections.append("**💰 Price Information**")
         if symbol and price_snapshot.get("crypto"):
             crypto_price = price_snapshot["crypto"].get(symbol)
             if crypto_price:
                 price_str = f"${crypto_price:,.8f}".rstrip('0').rstrip('.')
-                sections.append(f"**Current Price:** {price_str}")
-            elif error_messages:
-                sections.append(f"**Current Price:** Unavailable")
+                sections.append(f"- **Current Price:** {price_str}")
+            else:
+                sections.append(f"- **Current Price:** Data unavailable")
         elif pair and price_snapshot.get("pair"):
             rate = price_snapshot["pair"].get("rate")
             if rate:
-                sections.append(f"**Exchange Rate:** {rate:.4f}")
-            elif error_messages:
-                sections.append(f"**Exchange Rate:** Unavailable")
+                sections.append(f"- **Exchange Rate:** {rate:.4f}")
+            else:
+                sections.append(f"- **Exchange Rate:** Data unavailable")
+        else:
+            sections.append("- Price data not available")
+        sections.append("")
         
-        # Technical indicators
+        # === TECHNICAL ANALYSIS ===
         if technical_data:
+            sections.append("**📈 Technical Analysis (7-Day)**")
             change_pct = technical_data.get("change_pct", 0)
             trend = technical_data.get("trend", "unknown")
-            sections.append(f"**7-Day Change:** {change_pct:+.2f}%")
-            sections.append(f"**Trend:** {trend.capitalize()}")
+            signal = technical_data.get("signal", "neutral")
+            price_position = technical_data.get("price_position", "N/A")
+            
+            sections.append(f"- **Trend:** {trend.capitalize()}")
+            sections.append(f"- **Price Change:** {change_pct:+.2f}%")
+            sections.append(f"- **Signal:** {signal.capitalize()}")
+            sections.append(f"- **Position vs SMA:** {price_position.replace('_', ' ').title()}")
+            
+            # Add support/resistance if available
+            if technical_data.get("support") and technical_data.get("resistance"):
+                support = technical_data["support"]
+                resistance = technical_data["resistance"]
+                sections.append(f"- **Support Level:** ${support:,.2f}")
+                sections.append(f"- **Resistance Level:** ${resistance:,.2f}")
+            
+            sections.append("")
         
-        # Key factors/reasoning
+        # === AI ANALYSIS ===
         reasons_list = reasons if isinstance(reasons, list) else [str(reasons)]
-        if reasons_list and reasons_list[0]:
-            sections.append("\n**Key Factors:**")
-            for reason in reasons_list[:3]:
+        if reasons_list and reasons_list[0] and reasons_list[0] != "rule-based fallback":
+            sections.append("**🤖 AI Insights**")
+            for reason in reasons_list[:5]:  # Show up to 5 key factors
                 sections.append(f"- {reason}")
+            sections.append("")
         
-        # Recent news headlines
-        if news:
-            sections.append("\n**Recent News:**")
-            for item in news[:3]:
+        # === NEWS HEADLINES ===
+        sections.append("**📰 Recent News**")
+        if news and len(news) > 0:
+            for item in news[:3]:  # Top 3 headlines
                 title = item.get("title", "")
-                source = item.get("source", "")
+                source = item.get("source", "Unknown")
                 if title:
                     sections.append(f"- {title} ({source})")
+        else:
+            sections.append("- News are not currently available for this asset")
+        sections.append("")
         
+        # === FOOTER ===
         if error_messages:
-            sections.append("\n💡 **Tip:** Try common coin symbols (BTC, ETH, SOL) or forex pairs (EUR/USD, GBP/USD).")
+            sections.append("💡 **Tip:** Try common symbols like BTC, ETH, SOL or forex pairs like EUR/USD, GBP/USD")
+        else:
+            sections.append("---")
+            sections.append("*This analysis is for informational purposes only and does not constitute financial advice.*")
         
         return "\n".join(sections)
 
