@@ -42,14 +42,12 @@ def fetch_coin_list() -> list[dict[str, Any]]:
     """
     global _coin_list_cache
     
-    # Check if cache is valid
     if _coin_list_cache is not None:
         coins, cached_at = _coin_list_cache
         if time.time() - cached_at < ALIAS_CACHE_TTL:
             logger.debug(f"Using cached coin list ({len(coins)} coins)")
             return coins
     
-    # Fetch fresh data
     try:
         url = "https://api.coingecko.com/api/v3/coins/list"
         response = requests.get(url, timeout=10)
@@ -147,12 +145,10 @@ def resolve_coin_alias(query: str) -> str | None:
     if _alias_map_cache is None:
         _alias_map_cache = build_alias_map()
     
-    # Try exact match first
     coin_id = _alias_map_cache.get(query)
     if coin_id:
         return coin_id
     
-    # Try case-insensitive match
     for alias, cid in _alias_map_cache.items():
         if alias.lower() == query.lower():
             return cid

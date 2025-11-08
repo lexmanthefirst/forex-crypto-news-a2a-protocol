@@ -20,7 +20,6 @@ async def send_webhook_notification(
     """Send result to webhook URL"""
     headers = {"Content-Type": "application/json"}
     
-    # Handle authentication
     if token:
         headers["Authorization"] = f"Bearer {token}"
     elif auth and auth.get("schemes") == ["Bearer"]:

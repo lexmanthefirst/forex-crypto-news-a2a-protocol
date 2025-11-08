@@ -198,7 +198,6 @@ async def get_comprehensive_market_summary() -> dict[str, Any]:
     - Recently added coins
     - Major forex pairs
     """
-    # Fetch all data in parallel
     results = await asyncio.gather(
         get_top_cryptos_by_market_cap(limit=20),
         get_trending_cryptos(),

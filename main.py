@@ -215,7 +215,6 @@ def _create_internal_error_response(request_id: str, exc: Exception) -> JSONResp
 #         # Send webhook notification (blog's method)
 #         headers = {"Content-Type": "application/json"}
 #         
-#         if push_token:
 #             headers["Authorization"] = f"Bearer {push_token}"
 #         
 #         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -235,46 +234,56 @@ def _create_internal_error_response(request_id: str, exc: Exception) -> JSONResp
 #         logger.error("[webhook] ✗ Failed: %s (task_id=%s)", e, task_id, exc_info=True)
 
 
-async def _handle_message_send(request_id: str, params: MessageParams) -> JSONResponse:
-    """Handle message/send JSON-RPC method.
+async def _handle_message_send(rpc_request: JSONRPCRequest):
+    """Handle message/send JSON-RPC method."""
+    if not rpc_request.params:
+        raise ValueError("Missing required 'params' field")
     
-    Processes messages synchronously and returns completed result.
-    """
-    # Validate messages
+    params = rpc_request.params
+    
     if not params.messages or len(params.messages) == 0:
         raise ValueError("At least one message is required")
     
-    user_message = params.messages[0] if params.messages else None
-    if user_message and user_message.parts:
-        text_preview = next((p.text[:50] for p in user_message.parts if p.text), "")
-        logger.info("[message/send] Processing message: text=%r...", text_preview)
-    
-    logger.info("[message/send] Processing synchronously")
-    result = await _process_with_agent(
-        params.messages,
-        context_id=params.contextId,
-        task_id=params.taskId,
-        config=params.config
-    )
-    logger.info("[message/send] Processing complete: status=%s", result.status.state)
-    
-    response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
-    return JSONResponse(content=response.model_dump(mode='json', by_alias=True, exclude_none=True))
+    try:
+        config = getattr(params, 'config', None)
+        
+        result = await _process_with_agent(
+            params.messages,
+            context_id=params.contextId,
+            task_id=params.taskId,
+            config=config
+        )
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error processing messages: {e}", exc_info=True)
+        raise
 
 
-async def _handle_execute(request_id: str, params: ExecuteParams) -> JSONResponse:
+async def _handle_execute(rpc_request: JSONRPCRequest):
     """Handle execute JSON-RPC method."""
+    if not rpc_request.params:
+        raise ValueError("Missing required 'params' field")
+    
+    params = rpc_request.params
+    
     if not params.messages or len(params.messages) == 0:
         raise ValueError("At least one message is required")
     
-    result = await _process_with_agent(
-        params.messages,
-        context_id=params.contextId,
-        task_id=params.taskId,
-        config=params.configuration
-    )
-    response = JSONRPCResponse(jsonrpc="2.0", id=request_id, result=result)
-    return JSONResponse(content=response.model_dump(mode='json', by_alias=True, exclude_none=True))
+    try:
+        config = getattr(params, 'configuration', None)
+        
+        result = await _process_with_agent(
+            params.messages,
+            context_id=params.contextId,
+            task_id=params.taskId,
+            config=config
+        )
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error executing: {e}", exc_info=True)
+        raise
 
 
 
@@ -285,51 +294,151 @@ async def a2a_endpoint(request: Request):
     
     Handles JSON-RPC 2.0 methods: message/send, execute
     """
-    body_result = await _parse_request_body(request)
-    if isinstance(body_result, JSONResponse):
-        logger.error("[a2a] Request parsing failed")
-        return body_result
-    
-    logger.info("[a2a] Incoming request: method=%s id=%s", 
-               body_result.get("method"), body_result.get("id"))
-    
-    rpc = await _validate_jsonrpc_request(body_result, lenient=True)
-    if isinstance(rpc, JSONResponse):
-        logger.error("[a2a] JSON-RPC validation failed")
-        return rpc
+    if market_agent is None:
+        logger.error("Agent not initialized")
+        return JSONResponse(
+            content={
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {
+                    "code": A2AErrorCode.INTERNAL_ERROR.value,
+                    "message": "Agent not initialized"
+                }
+            },
+            status_code=500
+        )
     
     try:
-        params = rpc.params
-        response = None
+        try:
+            body = await request.json()
+        except Exception as e:
+            logger.error(f"Invalid JSON in request: {e}")
+            return JSONResponse(
+                content={
+                    "jsonrpc": "2.0",
+                    "id": None,
+                    "error": {
+                        "code": A2AErrorCode.PARSE_ERROR.value,
+                        "message": "Invalid JSON"
+                    }
+                },
+                status_code=400
+            )
         
-        if isinstance(params, MessageParams):
-            logger.info("[a2a] Processing message/send")
-            response = await _handle_message_send(rpc.id, params)
-        elif isinstance(params, ExecuteParams):
-            logger.info("[a2a] Processing execute")
-            response = await _handle_execute(rpc.id, params)
-        else:
-            raise ValueError(f"Unsupported params type: {type(params)}")
+        if not isinstance(body, dict):
+            return JSONResponse(
+                content={
+                    "jsonrpc": "2.0",
+                    "id": None,
+                    "error": {
+                        "code": A2AErrorCode.INVALID_REQUEST.value,
+                        "message": "Request must be a JSON object"
+                    }
+                },
+                status_code=400
+            )
         
-        if response:
-            logger.info("[a2a] Response sent: id=%s status=success", rpc.id)
+        if body.get("jsonrpc") != "2.0":
+            return JSONResponse(
+                content={
+                    "jsonrpc": "2.0",
+                    "id": body.get("id"),
+                    "error": {
+                        "code": A2AErrorCode.INVALID_REQUEST.value,
+                        "message": "Invalid JSON-RPC version, must be '2.0'"
+                    }
+                },
+                status_code=400
+            )
         
-        return response
+        if "id" not in body:
+            return JSONResponse(
+                content={
+                    "jsonrpc": "2.0",
+                    "id": None,
+                    "error": {
+                        "code": A2AErrorCode.INVALID_REQUEST.value,
+                        "message": "Missing required field 'id'"
+                    }
+                },
+                status_code=400
+            )
+        
+        try:
+            rpc_request = JSONRPCRequest(**body)
+        except Exception as e:
+            logger.error(f"Failed to parse JSON-RPC request: {e}")
+            return JSONResponse(
+                content={
+                    "jsonrpc": "2.0",
+                    "id": body.get("id"),
+                    "error": {
+                        "code": A2AErrorCode.INVALID_REQUEST.value,
+                        "message": "Invalid request format",
+                        "data": {"details": str(e)}
+                    }
+                },
+                status_code=400
+            )
+        
+        logger.info(f"Received {rpc_request.method} request (id: {rpc_request.id})")
+        
+        if rpc_request.method == "message/send":
+            result = await _handle_message_send(rpc_request)
             
-    except Exception as exc:
-        logger.error("[a2a] Unhandled error: %s", exc, exc_info=True)
+        elif rpc_request.method == "execute":
+            result = await _handle_execute(rpc_request)
+            
+        else:
+            logger.warning(f"Unknown method: {rpc_request.method}")
+            return JSONResponse(
+                content={
+                    "jsonrpc": "2.0",
+                    "id": rpc_request.id,
+                    "error": {
+                        "code": A2AErrorCode.METHOD_NOT_FOUND.value,
+                        "message": f"Method '{rpc_request.method}' not found"
+                    }
+                },
+                status_code=404
+            )
         
-        error_payload = {
-            "jsonrpc": "2.0",
-            "id": rpc.id,
-            "error": {
-                "code": A2AErrorCode.INTERNAL_ERROR.value,
-                "message": "Internal error",
-                "data": {"details": str(exc), "trace": traceback.format_exc()}
-            }
-        }
-        logger.info("[a2a] Error response sent: id=%s", rpc.id)
-        return JSONResponse(status_code=200, content=error_payload)
+        response = JSONRPCResponse(
+            jsonrpc="2.0",
+            id=rpc_request.id,
+            result=result
+        )
+        
+        logger.info(f"Request {rpc_request.id} completed successfully")
+        
+        return JSONResponse(
+            content=response.model_dump(exclude_none=True, mode='json'),
+            status_code=200
+        )
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in a2a_endpoint: {e}", exc_info=True)
+        
+        # Try to extract the request ID for error response
+        error_id = None
+        try:
+            request_body = await request.json()
+            error_id = request_body.get("id")
+        except:
+            pass
+        
+        return JSONResponse(
+            content={
+                "jsonrpc": "2.0",
+                "id": error_id,
+                "error": {
+                    "code": A2AErrorCode.INTERNAL_ERROR.value,
+                    "message": "Internal server error",
+                    "data": {"details": str(e)}
+                }
+            },
+            status_code=500
+        )
 
 
 # System Routes

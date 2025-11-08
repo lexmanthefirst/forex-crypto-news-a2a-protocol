@@ -1,6 +1,4 @@
-"""
-A2A Protocol Models
-"""
+"""A2A Protocol Models"""
 from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional, List, Dict, Union
@@ -10,8 +8,7 @@ from pydantic import BaseModel, Field
 
 
 class MessagePart(BaseModel):
-    """Message part - can be text, data, or file.
-    """
+    """Message part containing text, data, or file."""
     kind: Literal["text", "data", "file"]
     text: Optional[str] = None
     data: Optional[Union[Dict[str, Any], List[Any]]] = None
@@ -19,7 +16,7 @@ class MessagePart(BaseModel):
 
 
 class A2AMessage(BaseModel):
-    """A2A message format."""
+    """A2A protocol message."""
     kind: Literal["message"] = "message"
     role: Literal["user", "agent", "system"]
     parts: List[MessagePart]
@@ -29,25 +26,33 @@ class A2AMessage(BaseModel):
 
 
 class PushNotificationConfig(BaseModel):
-    """Configuration for push notifications."""
+    """Push notification configuration."""
     url: str
     token: Optional[str] = None
     authentication: Optional[Dict[str, Any]] = None
 
 
 class MessageConfiguration(BaseModel):
-    """Configuration for message sending."""
+    """Message sending configuration."""
     blocking: bool = True
     acceptedOutputModes: List[str] = ["text/plain", "image/png", "image/svg+xml"]
     pushNotificationConfig: Optional[PushNotificationConfig] = None
 
 
 class MessageParams(BaseModel):
-    """Parameters for message/send method (Telex-compatible)."""
-    messages: List[A2AMessage]  # Note: PLURAL, it's a list
+    """Parameters for message/send method."""
+    message: Optional[A2AMessage] = None
+    messages: Optional[List[A2AMessage]] = None
     contextId: Optional[str] = None
     taskId: Optional[str] = None
     config: Optional[Dict[str, Any]] = Field(default=None, alias="configuration")
+    
+    def model_post_init(self, __context):
+        """Normalize message/messages after validation."""
+        if self.message and not self.messages:
+            self.messages = [self.message]
+        elif not self.messages:
+            self.messages = []
 
 
 class ExecuteParams(BaseModel):
@@ -81,7 +86,7 @@ class Artifact(BaseModel):
 
 
 class TaskResult(BaseModel):
-    """Result of a task execution."""
+    """Task execution result."""
     taskId: str
     contextId: str
     status: TaskStatus
@@ -98,20 +103,12 @@ class JSONRPCResponse(BaseModel):
     error: Optional[Dict[str, Any]] = None
 
     def model_dump(self, **kwargs):
-        """Ensure proper JSON-RPC response format.
-        
-        JSON-RPC 2.0 spec: response must have either 'result' OR 'error', never both.
-        - Include 'result' field when successful
-        - Include 'error' field when failed
-        - Exclude the other field
-        """
+        """Serialize response per JSON-RPC 2.0 spec (result XOR error)."""
         data = super().model_dump(**kwargs)
         
-        # Remove error field if it's None (proper JSON-RPC: either result or error, never both)
         if self.error is None and 'error' in data:
             del data['error']
         
-        # Remove result field if error is present
         if self.error is not None and 'result' in data:
             del data['result']
         

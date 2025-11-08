@@ -57,13 +57,11 @@ async def fetch_price_history(symbol: str, days: int = 7) -> list[float]:
     """
     symbol_upper = symbol.upper()
     
-    # Try to get coin ID from map, otherwise search for it
     if symbol_upper in COIN_ID_MAP:
         coin_id = COIN_ID_MAP[symbol_upper]
     else:
         coin_id = await search_coin_id(symbol_upper)
         if not coin_id:
-            # Fallback to lowercase if no exact match
             coin_id = symbol.lower()
     
     url = f"{COINGECKO_BASE}/coins/{coin_id}/market_chart"

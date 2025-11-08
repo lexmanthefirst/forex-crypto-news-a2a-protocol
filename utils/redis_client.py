@@ -39,7 +39,6 @@ class RedisClient:
         raw = await self.client.get(f"session:{session_id}")
         return json.loads(raw) if raw else None
 
-    # Store last analysis for a pair/subject
     async def set_latest_analysis(self, key: str, payload: dict[str, Any], ex: int = 3600) -> None:
         await self.client.set(f"analysis:{key}", json.dumps(payload), ex=ex)
 

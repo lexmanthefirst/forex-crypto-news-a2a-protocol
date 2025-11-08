@@ -64,10 +64,8 @@ def extract_coin_with_llm(query: str) -> str | None:
             logger.warning(f"Empty response from LLM for query: {query}")
             return None
         
-        # Clean up response - remove any quotes, whitespace, markdown
         result = response.strip().strip('"').strip("'").strip('`').strip()
         
-        # Check if no coin was found
         if result.upper() == "NONE" or not result or len(result) > 50:
             logger.debug(f"No coin found in query: {query}")
             return None

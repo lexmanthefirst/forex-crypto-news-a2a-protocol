@@ -29,9 +29,7 @@ def clean_html(raw: str) -> str:
     """
     if not raw:
         return ""
-    # Decode HTML entities (&amp; -> &, etc.)
     text = unescape(raw)
-    # Remove HTML tags
     text = _TAGS_RE.sub(" ", text)
     # Normalize whitespace
     text = _WS_RE.sub(" ", text).strip()
@@ -57,7 +55,6 @@ def extract_conversation_history(params: dict[str, Any]) -> list[str]:
         message = (params or {}).get("message") or {}
         parts = message.get("parts") or []
         
-        # Check for data part at parts[1]
         if len(parts) > 1 and isinstance(parts[1], dict):
             if parts[1].get("kind") == "data":
                 data_items = parts[1].get("data") or []
@@ -97,7 +94,6 @@ def extract_text_primary(params: dict[str, Any]) -> tuple[str | None, dict[str, 
         message = (params or {}).get("message") or {}
         parts = message.get("parts") or []
         
-        # Strategy 1: Get conversation history and use last message
         history = extract_conversation_history(params)
         if history:
             extracted_text = history[-1]
@@ -106,7 +102,6 @@ def extract_text_primary(params: dict[str, Any]) -> tuple[str | None, dict[str, 
             debug_info["history_index"] = len(history) - 1
             return extracted_text, debug_info
         
-        # Strategy 2: Current message from parts[0].text
         if len(parts) > 0 and isinstance(parts[0], dict):
             if parts[0].get("kind") == "text":
                 text = clean_html(parts[0].get("text") or "")
@@ -115,7 +110,6 @@ def extract_text_primary(params: dict[str, Any]) -> tuple[str | None, dict[str, 
                     debug_info["source"] = "parts[0].text"
                     return extracted_text, debug_info
         
-        # Strategy 3: Fallback to message.text
         message_text = clean_html(message.get("text") or "")
         if message_text:
             extracted_text = message_text
@@ -147,7 +141,6 @@ def extract_text_fallback(params: dict[str, Any]) -> tuple[str | None, dict[str,
         message = (params or {}).get("message") or {}
         parts = message.get("parts") or []
         
-        # Try parts[0].text without cleaning
         if len(parts) > 0 and isinstance(parts[0], dict):
             if parts[0].get("kind") == "text":
                 text = (parts[0].get("text") or "").strip()
@@ -156,7 +149,6 @@ def extract_text_fallback(params: dict[str, Any]) -> tuple[str | None, dict[str,
                     debug_info["source"] = "parts[0].text_raw"
                     return extracted_text, debug_info
         
-        # Try message.text without cleaning
         message_text = (message.get("text") or "").strip()
         if message_text:
             extracted_text = message_text
@@ -193,15 +185,12 @@ def extract_text_from_telex_message(params: dict[str, Any]) -> tuple[str | None,
         >>> debug["source"]
         "parts[0].text"
     """
-    # Try primary extraction
     text, debug_info = extract_text_primary(params)
     
-    # If primary fails, try fallback
     if not text:
         text, fallback_debug = extract_text_fallback(params)
         debug_info.update(fallback_debug)
     
-    # Always extract conversation history
     history = extract_conversation_history(params)
     debug_info["history_count"] = len(history)
     

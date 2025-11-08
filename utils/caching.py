@@ -81,7 +81,6 @@ def redis_cache(ttl: int = 60) -> Callable[[Callable[..., Awaitable[T]]], Callab
             
             redis_available = False
             
-            # Try to get from Redis first
             try:
                 cached_result = await redis_store.get_cache(cache_key)
                 if cached_result is not None:
@@ -99,14 +98,12 @@ def redis_cache(ttl: int = 60) -> Callable[[Callable[..., Awaitable[T]]], Callab
             # Execute function if not in cache
             result = await func(*args, **kwargs)
             
-            # Store in cache (try both Redis and memory)
             if redis_available:
                 try:
                     await redis_store.set_cache(cache_key, result, ex=ttl)
                     # Also store in memory for faster access
                     await _set_to_memory_cache(cache_key, result, ttl)
                 except Exception:
-                    # If Redis caching fails, at least store in memory
                     await _set_to_memory_cache(cache_key, result, ttl)
             else:
                 # Redis not available, use memory cache

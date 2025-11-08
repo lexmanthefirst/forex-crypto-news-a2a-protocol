@@ -47,7 +47,6 @@ async def search_coin_id(symbol: str) -> str | None:
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.get(url, params=params, headers=headers)
             
-            # Check for rate limiting
             if response.status_code == 429:
                 logger.warning(f"[CoinGecko Search] Rate limited for symbol: {symbol}")
                 return None
@@ -57,7 +56,6 @@ async def search_coin_id(symbol: str) -> str | None:
         
         coins = data.get("coins", [])
         
-        # Only return if exact symbol match found
         for coin in coins:
             if coin.get("symbol", "").upper() == symbol.upper():
                 coin_id = coin.get("id")

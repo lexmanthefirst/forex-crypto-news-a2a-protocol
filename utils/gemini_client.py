@@ -104,7 +104,6 @@ def _generate_with_gemini(prompt: str, timeout: int) -> dict[str, Any]:
     except Exception as exc:
         error_message = str(exc)
         
-        # Check if it's a quota/rate limit error
         if "RESOURCE_EXHAUSTED" in error_message or "429" in error_message or "quota" in error_message.lower():
             # Return special marker to indicate quota exhaustion
             return {"quota_exceeded": True}

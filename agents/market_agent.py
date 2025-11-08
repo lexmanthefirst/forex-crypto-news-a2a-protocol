@@ -22,11 +22,7 @@ from utils.telex_parser import extract_text_from_telex_message
 
 logger = logging.getLogger(__name__)
 
-# Regex to extract currency pair or coin symbol
-# Matches forex pairs like EUR/USD, EUR-USD, or EURUSD
 PAIR_RE = re.compile(r"([A-Za-z]{3,5})\s*[/\-]\s*([A-Za-z]{3,5})")
-# Matches any crypto symbol (2-5 uppercase letters) as a standalone word
-# Common patterns: BTC, ETH, USDT, BNB, SOL, ADA, MATIC, etc.
 SYMBOL_RE = re.compile(r"\b([A-Z]{2,5})\b")
 
 
@@ -43,57 +39,37 @@ class MarketAgent:
 
     @staticmethod
     def _strip_html(text: str) -> str:
-        """Remove HTML tags and decode HTML entities from text."""
-        # Remove HTML tags
+        """Remove HTML tags and decode entities."""
         text = re.sub(r'<[^>]+>', '', text)
-        # Decode HTML entities (&amp; -> &, &lt; -> <, etc.)
         text = unescape(text)
-        # Clean up extra whitespace
         text = ' '.join(text.split())
         return text
 
     @staticmethod
     def _extract_text_from_message(message: A2AMessage) -> str:
-        """
-        Robust text extraction from A2A message with multiple fallback strategies.
-        
-        Handles various message structures from different platforms (Telex, etc.):
-        1. Direct text parts (kind="text")
-        2. Nested data parts with text fields
-        3. File content extraction (if applicable)
-        
-        Returns:
-            Extracted and cleaned text string
-        """
+        """Extract text from A2A message with multiple fallback strategies."""
         text_parts: list[str] = []
         
-        # Strategy 1: Extract from text parts directly
         for part in message.parts:
             if part.kind == "text" and part.text and part.text.strip():
                 text_parts.append(part.text.strip())
         
-        # Strategy 2: Check data parts for nested text
         if not text_parts:
             for part in message.parts:
                 if part.kind == "data" and part.data:
-                    # Handle case where data is a dict with text field
                     if isinstance(part.data, dict):
                         if "text" in part.data and part.data["text"]:
                             text_parts.append(str(part.data["text"]).strip())
-                        # Check for nested message structures
                         elif "message" in part.data and isinstance(part.data["message"], str):
                             text_parts.append(part.data["message"].strip())
-                        # Check for content field
                         elif "content" in part.data and isinstance(part.data["content"], str):
                             text_parts.append(part.data["content"].strip())
-                        # Handle nested list in data
                         elif "items" in part.data and isinstance(part.data["items"], list):
                             for item in part.data["items"]:
                                 if isinstance(item, str) and item.strip():
                                     text_parts.append(item.strip())
                                 elif isinstance(item, dict) and "text" in item:
                                     text_parts.append(str(item["text"]).strip())
-                    # Handle case where data is a list directly (Telex compatibility)
                     elif isinstance(part.data, list):
                         for item in part.data:
                             if isinstance(item, str) and item.strip():
@@ -101,10 +77,8 @@ class MarketAgent:
                             elif isinstance(item, dict) and "text" in item:
                                 text_parts.append(str(item["text"]).strip())
         
-        # Combine all extracted text
         combined_text = " ".join(text_parts)
         
-        # Strip HTML and clean up
         if combined_text:
             combined_text = MarketAgent._strip_html(combined_text)
         
@@ -126,27 +100,22 @@ class MarketAgent:
 
         user_msg = messages[-1]
         
-        # Try enhanced Telex extraction first (if config has params structure)
         text: str | None = None
         conversation_history: list[str] = []
         extraction_debug: dict[str, Any] = {}
         
         if config and isinstance(config, dict):
-            # Try Telex-style extraction from params
             text, conversation_history, extraction_debug = extract_text_from_telex_message(config)
             if text:
                 logger.info(f"Telex extraction: {extraction_debug.get('source')}, history: {len(conversation_history)} msgs")
         
-        # Fallback to standard extraction if Telex extraction failed
         if not text:
             text = self._extract_text_from_message(user_msg)
             extraction_debug = {"source": "fallback_message_extraction"}
         
-        # If empty after extraction, return early with helpful error
         if not text or not text.strip():
             raise ValueError("No analyzable text found in message. Please provide a query with cryptocurrency symbol, name, or forex pair (e.g., 'BTC price', 'Bitcoin analysis', 'EUR/USD rate').")
 
-        # Store conversation history if available
         if conversation_history and context_id:
             try:
                 for hist_text in conversation_history[-5:]:  # Store last 5 for context
@@ -158,13 +127,11 @@ class MarketAgent:
             except Exception as e:
                 logger.warning(f"Failed to store conversation history: {e}")
         
-        # Store current user message
         try:
             await session_store.append_message(context_id, user_msg)
         except Exception as e:
             logger.warning(f"Failed to store user message: {e}")
 
-        # Check if this is a market summary/overview request
         if self._is_market_summary_request(text):
             return await self._handle_market_summary(messages, context_id, task_id)
 
@@ -186,7 +153,6 @@ class MarketAgent:
             try:
                 prices = await fetch_crypto_prices([symbol])
                 price_snapshot["crypto"] = prices
-                # Fetch technical indicators
                 technical_data = await get_technical_summary(symbol)
             except Exception as e:
                 price_snapshot["crypto"] = {symbol: None}
@@ -199,7 +165,6 @@ class MarketAgent:
             or "No recent headlines found."
         )
         
-        # Add technical analysis to context
         if technical_data:
             tech_summary = (
                 f"\n\n**Technical Analysis (7-day):**\n"
@@ -252,7 +217,6 @@ class MarketAgent:
         reasons = analysis.get("reasoning") or []
         direction = analysis.get("direction", "neutral")
         
-        # Format the analysis message using Markdown
         agent_text = self._format_analysis_message(
             key=key,
             direction=direction,
@@ -266,7 +230,6 @@ class MarketAgent:
             error_messages=error_messages
         )
         
-        # Create agent message with text part only (for Telex display compatibility)
         agent_msg = A2AMessage(
             role="agent", 
             parts=[
@@ -275,7 +238,6 @@ class MarketAgent:
             taskId=task_id
         )
 
-        # Store structured data in artifacts (not in message parts)
         artifacts: list[Artifact] = [
             Artifact(name="analysis", parts=[MessagePart(kind="data", data=analysis)]),
         ]
@@ -283,7 +245,6 @@ class MarketAgent:
             artifacts.append(Artifact(name="price_snapshot", parts=[MessagePart(kind="data", data=price_snapshot)]))
         if technical_data:
             artifacts.append(Artifact(name="technical_indicators", parts=[MessagePart(kind="data", data=technical_data)]))
-        # Always include recent_news artifact, even if empty
         artifacts.append(Artifact(name="recent_news", parts=[MessagePart(kind="data", data={"items": relevant[:3] if relevant else []})]))
 
 
@@ -293,7 +254,6 @@ class MarketAgent:
 
         task_status = TaskStatus(state=status_state, message=agent_msg)
         
-        # Store agent response in session history
         try:
             await session_store.append_message(context_id, agent_msg)
         except Exception as e:
@@ -314,7 +274,6 @@ class MarketAgent:
         For 6-letter patterns like EURUSD, only accept if it looks like a valid forex pair
         (both halves are common currency codes, not random words like LATEST).
         """
-        # Check for natural language forex pair names first
         text_lower = text.lower()
         natural_language_pairs = {
             "euro dollar": "EUR/USD",
@@ -336,14 +295,11 @@ class MarketAgent:
                 logger.info(f"[Natural language] Matched '{phrase}' -> '{pair}'")
                 return pair
         
-        # Try explicit pair format (EUR/USD, EUR-USD)
         m = PAIR_RE.search(text)
         if m:
             a, b = m.groups()
             return f"{a.upper()}/{b.upper()}"
         
-        # For 6-letter words, validate they look like currency codes
-        # Common forex currencies: USD, EUR, GBP, JPY, AUD, CAD, CHF, NZD, CNY, etc.
         valid_currencies = {
             "USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD", 
             "CNY", "SEK", "NOK", "DKK", "SGD", "HKD", "KRW", "INR",
@@ -355,7 +311,6 @@ class MarketAgent:
             s = m2.group(1).upper()
             first_half = s[:3]
             second_half = s[3:]
-            # Only treat as forex pair if both parts are known currency codes
             if first_half in valid_currencies and second_half in valid_currencies:
                 return f"{first_half}/{second_half}"
         
@@ -371,7 +326,6 @@ class MarketAgent:
         
         Returns the CoinGecko ID (e.g., "bitcoin") for compatibility with price APIs.
         """
-        # Try LLM-based extraction first (most accurate)
         coin_query = extract_coin_with_llm(text)
         if coin_query:
             # Filter out garbage responses (placeholders, weird patterns)
@@ -379,16 +333,13 @@ class MarketAgent:
                 logger.warning(f"[LLM] Invalid extraction '{coin_query}', falling back to regex")
                 coin_query = None  # Force fallback
             else:
-                # Try to resolve to CoinGecko ID
                 coin_id = resolve_coin_alias(coin_query)
                 if coin_id:
                     logger.info(f"[LLM] Extracted '{coin_query}' -> resolved to '{coin_id}'")
                     return coin_id
-                # If not in alias map, use as-is (lowercase)
                 logger.info(f"[LLM] Extracted '{coin_query}' (no alias, using lowercase)")
                 return coin_query.lower()
         
-        # Fallback to legacy crypto_map for common coins
         crypto_map = {
             "bitcoin": "bitcoin",
             "ethereum": "ethereum",
@@ -439,14 +390,11 @@ class MarketAgent:
         return news
 
     def _extract_analysis_data(self, task: TaskResult) -> dict[str, Any]:
-        # Prefer artifact data
         for artifact in task.artifacts:
             for part in artifact.parts:
                 if part.kind == "data" and part.data:
-                    # Only use dict data, skip list (conversation history)
                     if isinstance(part.data, dict):
                         return part.data
-        # Fallback to status message data part
         if task.status.message:
             for part in task.status.message.parts:
                 if part.kind == "data" and part.data:
@@ -481,10 +429,8 @@ class MarketAgent:
             "market overview",
         ]
         
-        # Check if any keyword is present and no specific symbol is being requested
         has_summary_keyword = any(keyword in text_lower for keyword in summary_keywords)
         
-        # If it has summary keywords, it's likely a market summary request
         return has_summary_keyword
 
     async def _handle_market_summary(
@@ -495,13 +441,10 @@ class MarketAgent:
     ) -> TaskResult:
         """Handle market summary requests with comprehensive market data."""
         
-        # Fetch comprehensive market data
         summary = await get_comprehensive_market_summary()
         
-        # Format as human-readable text
         summary_text = format_market_summary_text(summary)
         
-        # Create agent response message
         agent_msg = A2AMessage(
             role="agent",
             parts=[
@@ -609,7 +552,6 @@ class MarketAgent:
                 if title:
                     sections.append(f"- {title} ({source})")
         
-        # Add helpful tip if there were errors
         if error_messages:
             sections.append("\n💡 **Tip:** Try common coin symbols (BTC, ETH, SOL) or forex pairs (EUR/USD, GBP/USD).")
         

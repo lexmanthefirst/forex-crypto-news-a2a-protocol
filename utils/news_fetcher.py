@@ -83,10 +83,8 @@ async def fetch_crypto_prices(symbols: Iterable[str]) -> dict[str, float]:
         if symbol in COIN_ID_MAP:
             coin_id = COIN_ID_MAP[symbol]
         else:
-            # Try to find the coin ID dynamically
             coin_id = await search_coin_id(symbol)
             if not coin_id:
-                # Fallback to lowercase if no exact match
                 coin_id = symbol.lower()
         
         coin_ids.append(coin_id)

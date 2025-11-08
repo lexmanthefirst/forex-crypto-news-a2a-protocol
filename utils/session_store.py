@@ -73,14 +73,12 @@ class SessionStore:
             if len(history) > self.max_messages:
                 history = history[-self.max_messages:]
             
-            # Store entire history as JSON string
             await redis_store.client.set(key, json.dumps(history, default=str), ex=self.ttl)
             
             logger.debug(f"Appended message to session {session_id} ({len(history)} total)")
             
         except Exception as e:
             logger.warning(f"Failed to append message to Redis session {session_id}: {e}")
-            # Fallback to memory
             if session_id not in self._memory_fallback:
                 self._memory_fallback[session_id] = []
             self._memory_fallback[session_id].append(message_dict)
@@ -112,7 +110,6 @@ class SessionStore:
             
         except Exception as e:
             logger.warning(f"Failed to get history from Redis for session {session_id}: {e}")
-            # Fallback to memory
             return self._memory_fallback.get(session_id, [])
     
     async def clear_history(self, session_id: str) -> None:
