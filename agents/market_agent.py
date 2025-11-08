@@ -7,6 +7,7 @@ import re
 from datetime import datetime, timezone
 from html import unescape
 from typing import Any
+from uuid import uuid4
 
 from models.a2a import A2AMessage, Artifact, MessagePart, TaskResult, TaskStatus
 from utils.coin_aliases import resolve_coin_alias
@@ -301,8 +302,11 @@ class MarketAgent:
             role="agent", 
             parts=[
                 MessagePart(kind="text", text=agent_text),
-            ], 
-            taskId=task_id
+            ],
+            messageId=str(uuid4()),
+            contextId=context_id,
+            taskId=task_id,
+            timestamp=datetime.now(timezone.utc)
         )
 
         artifacts: list[Artifact] = [
@@ -580,6 +584,10 @@ class MarketAgent:
                 MessagePart(kind="text", text=summary_text),
                 MessagePart(kind="data", data=summary),
             ],
+            messageId=str(uuid4()),
+            contextId=context_id,
+            taskId=task_id,
+            timestamp=datetime.now(timezone.utc)
         )
         
         # Build artifacts

@@ -21,7 +21,9 @@ class A2AMessage(BaseModel):
     role: Literal["user", "agent", "system"]
     parts: List[MessagePart]
     messageId: str = Field(default_factory=lambda: str(uuid4()))
+    contextId: Optional[str] = None
     taskId: Optional[str] = None
+    timestamp: Optional[datetime] = None
     metadata: Optional[Dict[str, Any]] = None
 
 
