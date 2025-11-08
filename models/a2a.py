@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal, Optional, List, Dict, Union
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 
 class MessagePart(BaseModel):
@@ -93,6 +93,12 @@ class TaskResult(BaseModel):
     artifacts: List[Artifact] = []
     history: List[A2AMessage] = []
     kind: Literal["task"] = "task"
+    
+    @computed_field
+    @property
+    def id(self) -> str:
+        """Alias for taskId for Telex compatibility."""
+        return self.taskId
 
 
 class JSONRPCResponse(BaseModel):
