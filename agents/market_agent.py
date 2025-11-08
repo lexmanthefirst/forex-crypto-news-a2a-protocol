@@ -332,16 +332,14 @@ class MarketAgent:
             logger.warning(f"Failed to store agent message: {e}")
 
         # Step 5: Create status message (A2A protocol compliance)
+        # The status message should contain the SAME text as the artifact
         status_state = "completed"
         if (pair and price_snapshot.get("pair", {}).get("rate") is None) and (not symbol):
             status_state = "failed"
         
         status_message = A2AMessage(
             role="agent",
-            parts=[MessagePart(
-                kind="text",
-                text="Analysis completed successfully" if status_state == "completed" else "Analysis failed"
-            )],
+            parts=[MessagePart(kind="text", text=agent_text)],  # Same text as artifact
             messageId=str(uuid4()),
             taskId=None,  # Set to None like working agent
             metadata=None  # Set to None like working agent
@@ -632,12 +630,10 @@ class MarketAgent:
         self.contexts[context_id] = history
         
         # Step 5: Create status message (A2A protocol compliance)
+        # The status message should contain the SAME text as the artifact
         status_message = A2AMessage(
             role="agent",
-            parts=[MessagePart(
-                kind="text",
-                text="Market summary generated successfully"
-            )],
+            parts=[MessagePart(kind="text", text=summary_text)],  # Same text as artifact
             messageId=str(uuid4()),
             taskId=None,  # Set to None like working agent
             metadata=None  # Set to None like working agent
