@@ -529,19 +529,18 @@ class MarketAgent:
         incoming_messages: list[A2AMessage],
         agent_message: A2AMessage
     ) -> list[A2AMessage]:
-        """Build conversation history ensuring the formatted response is included.
+        """Build conversation history with agent response.
 
-        Mirrors the MoodMatch agent behavior so Telex clients can render the
-        final response from the `history` array without re-computing artifacts.
+        Per A2A protocol and Telex expectations, the history array should contain
+        ONLY the agent's response message. Telex maintains the full conversation
+        history on their side and just needs the agent's latest response to append.
+        
+        Reference: https://hng-stage3-task-production.up.railway.app blog example
+        shows history: [agent_response_only]
         """
-        history: list[A2AMessage] = []
-
-        for message in incoming_messages:
-            if message.role in {"user", "agent"}:
-                history.append(message)
-
-        history.append(agent_message)
-        return history
+        # Return only the agent's response message
+        # Telex will handle appending this to their conversation history
+        return [agent_message]
 
     def _extract_analysis_data(self, task: TaskResult) -> dict[str, Any]:
         for artifact in task.artifacts:
