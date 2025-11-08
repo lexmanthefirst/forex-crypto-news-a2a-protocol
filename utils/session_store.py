@@ -57,14 +57,15 @@ class SessionStore:
             session_id: Unique session identifier
             message: A2A message to append
         """
+        import asyncio
         import json
         
         key = self._get_session_key(session_id)
         message_dict = message.model_dump(mode='json', exclude_none=True)
         
         try:
-            # Get current history
-            history = await self.get_history(session_id)
+            # Get current history with timeout
+            history = await asyncio.wait_for(self.get_history(session_id), timeout=3.0)
             
             # Append new message
             history.append(message_dict)
@@ -73,10 +74,21 @@ class SessionStore:
             if len(history) > self.max_messages:
                 history = history[-self.max_messages:]
             
-            await redis_store.client.set(key, json.dumps(history, default=str), ex=self.ttl)
+            # Set with timeout
+            await asyncio.wait_for(
+                redis_store.client.set(key, json.dumps(history, default=str), ex=self.ttl),
+                timeout=3.0
+            )
             
             logger.debug(f"Appended message to session {session_id} ({len(history)} total)")
             
+        except asyncio.TimeoutError:
+            logger.warning(f"Redis timeout appending to session {session_id}, using memory fallback")
+            if session_id not in self._memory_fallback:
+                self._memory_fallback[session_id] = []
+            self._memory_fallback[session_id].append(message_dict)
+            if len(self._memory_fallback[session_id]) > self.max_messages:
+                self._memory_fallback[session_id] = self._memory_fallback[session_id][-self.max_messages:]
         except Exception as e:
             logger.warning(f"Failed to append message to Redis session {session_id}: {e}")
             if session_id not in self._memory_fallback:
@@ -95,19 +107,23 @@ class SessionStore:
         Returns:
             List of message dictionaries (oldest first)
         """
+        import asyncio
         import json
         
         key = self._get_session_key(session_id)
         
         try:
-            # Get history JSON from Redis
-            raw = await redis_store.client.get(key)
+            # Get history JSON from Redis with timeout
+            raw = await asyncio.wait_for(redis_store.client.get(key), timeout=3.0)
             if raw:
                 history = json.loads(raw)
                 logger.debug(f"Retrieved {len(history)} messages from session {session_id}")
                 return history
             return []
             
+        except asyncio.TimeoutError:
+            logger.warning(f"Redis timeout getting history for session {session_id}, using memory fallback")
+            return self._memory_fallback.get(session_id, [])
         except Exception as e:
             logger.warning(f"Failed to get history from Redis for session {session_id}: {e}")
             return self._memory_fallback.get(session_id, [])

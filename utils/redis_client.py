@@ -18,7 +18,15 @@ class RedisClient:
 
     async def initialize(self) -> None:
         if self._client is None:
-            self._client = aioredis.from_url(self._url, encoding="utf-8", decode_responses=True)
+            self._client = aioredis.from_url(
+                self._url,
+                encoding="utf-8",
+                decode_responses=True,
+                socket_connect_timeout=5,  # 5 second connection timeout
+                socket_timeout=5,  # 5 second operation timeout
+                retry_on_timeout=True,
+                health_check_interval=30
+            )
 
     async def close(self) -> None:
         if self._client is not None:
