@@ -748,6 +748,50 @@ class MarketAgent:
             sections.append("- News are not currently available for this asset")
         sections.append("")
         
+        # === OVERVIEW STATEMENT ===
+        if not error_messages:
+            sections.append("**📝 Overview**")
+            
+            # Build a concise 3-4 sentence overview based on the analysis
+            overview_parts = []
+            
+            # Sentence 1: Direction and confidence
+            if confidence >= 0.7:
+                confidence_desc = "strong"
+            elif confidence >= 0.5:
+                confidence_desc = "moderate"
+            else:
+                confidence_desc = "weak"
+            overview_parts.append(f"The analysis shows a {confidence_desc} {direction} signal with {confidence:.0%} confidence.")
+            
+            # Sentence 2: Technical trend (if available)
+            if technical_data:
+                change_pct = technical_data.get("change_pct", 0)
+                trend = technical_data.get("trend", "")
+                if trend and change_pct != 0:
+                    trend_desc = "upward" if trend == "bullish" else "downward" if trend == "bearish" else "sideways"
+                    overview_parts.append(f"Technical indicators reveal a {trend_desc} trend with a {change_pct:+.2f}% change over the past 7 days.")
+            
+            # Sentence 3: Price context (if available)
+            if symbol and price_snapshot.get("crypto"):
+                crypto_price = price_snapshot["crypto"].get(symbol)
+                if crypto_price:
+                    price_str = f"${crypto_price:,.8f}".rstrip('0').rstrip('.')
+                    overview_parts.append(f"The asset is currently trading at {price_str}.")
+            elif pair and price_snapshot.get("pair"):
+                rate = price_snapshot["pair"].get("rate")
+                if rate:
+                    overview_parts.append(f"The pair is currently trading at {rate:.4f}.")
+            
+            # Sentence 4: Key insight from AI reasoning
+            if reasons_list and reasons_list[0] and reasons_list[0] != "rule-based fallback" and len(reasons_list) > 0:
+                first_reason = reasons_list[0].strip()
+                if first_reason:
+                    overview_parts.append(f"Key factor: {first_reason}")
+            
+            sections.append("\n".join(overview_parts))
+            sections.append("")
+        
         # === FOOTER ===
         if error_messages:
             sections.append("💡 **Tip:** Try common symbols like BTC, ETH, SOL or forex pairs like EUR/USD, GBP/USD")
