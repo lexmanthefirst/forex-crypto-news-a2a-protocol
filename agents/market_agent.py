@@ -12,7 +12,7 @@ from models.a2a import A2AMessage, Artifact, MessagePart, TaskResult, TaskStatus
 from utils.coin_aliases import resolve_coin_alias
 from utils.gemini_client import analyze_sync
 from utils.market_summary import get_comprehensive_market_summary, format_market_summary_text
-from utils.news_fetcher import fetch_combined_news, fetch_crypto_prices, fetch_forex_rate
+from utils.news_fetcher import fetch_combined_news, fetch_crypto_prices, fetch_forex_rate, COIN_ID_MAP
 from utils.notifier import send_console_notification, send_webhook_notification
 from utils.prompt_extraction import extract_coin_with_llm
 from utils.redis_client import redis_store
@@ -317,29 +317,71 @@ class MarketAgent:
         return None
 
     def _extract_symbol(self, text: str) -> str | None:
-        """Extract cryptocurrency symbol from text using LLM-based extraction.
+        """Extract cryptocurrency symbol from text using simple map-based extraction.
         
-        Uses a prompt-based approach that intelligently:
-        - Understands context and ignores command words
-        - Handles various coin name formats (BTC, bitcoin, Bitcoin)
-        - Avoids false matches with random words
+        Priority order:
+        1. Check hardcoded COIN_ID_MAP (most reliable)
+        2. Try LLM extraction with map validation (fallback)
+        3. Hardcoded common names (last resort)
         
         Returns the CoinGecko ID (e.g., "bitcoin") for compatibility with price APIs.
         """
+        text_upper = text.upper()
+        text_lower = text.lower()
+        
+        # Skip common English words to avoid false matches
+        skip_words = {
+            "analyze", "check", "what", "about", "tell", "me", "price", "of", "the",
+            "is", "are", "was", "were", "have", "has", "had", "do", "does", "did",
+            "will", "would", "should", "could", "can", "may", "might", "must",
+            "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "from",
+            "with", "by", "as", "this", "that", "these", "those", "it", "its",
+            "show", "get", "give", "take", "make", "go", "come", "see", "know",
+            "think", "say", "tell", "ask", "use", "find", "want", "need", "try"
+        }
+        
+        # Priority 1: Direct match in COIN_ID_MAP (most reliable)
+        words = text_upper.replace(",", " ").replace(".", " ").split()
+        for word in words:
+            if word in skip_words or len(word) < 2:
+                continue
+            
+            # Check exact match in COIN_ID_MAP
+            if word in COIN_ID_MAP:
+                coin_id = COIN_ID_MAP[word]
+                logger.info(f"[Direct Match] '{word}' -> '{coin_id}'")
+                return coin_id
+        
+        # Priority 2: Check for full coin names in text
+        for key, coin_id in COIN_ID_MAP.items():
+            if len(key) > 3 and key in text_upper:  # Full names like "BITCOIN", "ETHEREUM"
+                logger.info(f"[Name Match] Found '{key}' -> '{coin_id}'")
+                return coin_id
+        
+        # Priority 3: Try LLM extraction (if map doesn't match)
         coin_query = extract_coin_with_llm(text)
         if coin_query:
-            # Filter out garbage responses (placeholders, weird patterns)
+            # Filter out garbage responses
             if "TICKER" in coin_query.upper() or len(coin_query) > 20 or "-" in coin_query:
-                logger.warning(f"[LLM] Invalid extraction '{coin_query}', falling back to regex")
-                coin_query = None  # Force fallback
+                logger.warning(f"[LLM] Invalid extraction '{coin_query}', skipping")
             else:
-                coin_id = resolve_coin_alias(coin_query)
-                if coin_id:
-                    logger.info(f"[LLM] Extracted '{coin_query}' -> resolved to '{coin_id}'")
+                # Check if LLM result is in our map
+                coin_query_upper = coin_query.upper()
+                if coin_query_upper in COIN_ID_MAP:
+                    coin_id = COIN_ID_MAP[coin_query_upper]
+                    logger.info(f"[LLM+Map] '{coin_query}' -> '{coin_id}'")
                     return coin_id
-                logger.info(f"[LLM] Extracted '{coin_query}' (no alias, using lowercase)")
+                
+                # Try to resolve via alias (only for major coins)
+                coin_id = resolve_coin_alias(coin_query)
+                if coin_id and coin_id in COIN_ID_MAP.values():
+                    logger.info(f"[LLM+Alias] '{coin_query}' -> '{coin_id}'")
+                    return coin_id
+                
+                logger.info(f"[LLM] Extracted '{coin_query}' (no map match, using lowercase)")
                 return coin_query.lower()
         
+        # Priority 4: Fallback hardcoded common names
         crypto_map = {
             "bitcoin": "bitcoin",
             "ethereum": "ethereum",
@@ -360,7 +402,6 @@ class MarketAgent:
             "usdc": "usd-coin",
         }
         
-        text_lower = text.lower()
         for name, coin_id in crypto_map.items():
             if name in text_lower:
                 logger.info(f"[Fallback] Matched '{name}' -> '{coin_id}'")

@@ -80,6 +80,8 @@ def build_alias_map() -> dict[str, str]:
     - Names (original case): "Bitcoin" → "bitcoin"
     - IDs: "bitcoin" → "bitcoin"
     
+    Prioritizes major coins to prevent wrong matches.
+    
     Returns:
         Dictionary mapping aliases to CoinGecko IDs
     """
@@ -88,7 +90,20 @@ def build_alias_map() -> dict[str, str]:
         logger.warning("No coins fetched, returning empty alias map")
         return {}
     
+    # Well-known coins that should take priority
+    # This prevents obscure coins from overwriting major ones
+    priority_coins = {
+        "bitcoin", "ethereum", "ripple", "litecoin", "bitcoin-cash",
+        "binancecoin", "tether", "usd-coin", "solana", "cardano",
+        "polkadot", "dogecoin", "matic-network", "avalanche-2",
+        "chainlink", "uniswap", "cosmos", "tron", "the-open-network",
+        "stellar", "shiba-inu", "aptos", "arbitrum", "optimism",
+        "injective-protocol", "sui", "near", "fetch-ai", "pepe",
+        "dogwifcoin"
+    }
+    
     alias_map: dict[str, str] = {}
+    priority_map: dict[str, str] = {}  # Separate map for priority coins
     
     for coin in coins:
         coin_id = coin.get("id", "")
@@ -98,20 +113,38 @@ def build_alias_map() -> dict[str, str]:
         if not coin_id:
             continue
         
+        is_priority = coin_id in priority_coins
+        target_map = priority_map if is_priority else alias_map
+        
         # Map ID to itself (for direct lookups)
-        alias_map[coin_id] = coin_id
+        target_map[coin_id] = coin_id
         
-        # Map symbol variations
+        # Map symbol variations (only if not already mapped by priority coin)
         if symbol:
-            alias_map[symbol.lower()] = coin_id
-            alias_map[symbol.upper()] = coin_id
+            symbol_lower = symbol.lower()
+            symbol_upper = symbol.upper()
+            
+            if symbol_lower not in priority_map:
+                target_map[symbol_lower] = coin_id
+            if symbol_upper not in priority_map:
+                target_map[symbol_upper] = coin_id
         
-        # Map name variations
+        # Map name variations (only if not already mapped by priority coin)
         if name:
-            alias_map[name.lower()] = coin_id
-            alias_map[name] = coin_id
+            name_lower = name.lower()
+            name_upper = name.upper()
+            
+            if name_lower not in priority_map:
+                target_map[name_lower] = coin_id
+            if name not in priority_map:
+                target_map[name] = coin_id
+            if name_upper not in priority_map:
+                target_map[name_upper] = coin_id
     
-    logger.info(f"Built alias map with {len(alias_map)} mappings")
+    # Merge: priority coins overwrite any conflicts
+    alias_map.update(priority_map)
+    
+    logger.info(f"Built alias map with {len(alias_map)} mappings ({len(priority_map)} priority)")
     return alias_map
 
 

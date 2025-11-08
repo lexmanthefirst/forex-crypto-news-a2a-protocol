@@ -9,7 +9,6 @@ from typing import Any, Iterable
 import httpx
 
 from utils.caching import redis_cache
-from utils.coingecko_helpers import search_coin_id
 
 logger = logging.getLogger(__name__)
 
@@ -26,36 +25,107 @@ CRYPTOPANIC_KEY = os.getenv("CRYPTOPANIC_API_KEY", "")
 # Helper map for common coin tickers to their CoinGecko IDs
 # Extended to support more cryptocurrencies
 COIN_ID_MAP = {
+    # Major Cryptocurrencies
     "BTC": "bitcoin",
+    "BITCOIN": "bitcoin",
     "ETH": "ethereum",
+    "ETHEREUM": "ethereum",
     "XRP": "ripple",
+    "RIPPLE": "ripple",
     "LTC": "litecoin",
+    "LITECOIN": "litecoin",
     "BCH": "bitcoin-cash",
     "SOL": "solana",
+    "SOLANA": "solana",
     "ADA": "cardano",
+    "CARDANO": "cardano",
     "DOT": "polkadot",
+    "POLKADOT": "polkadot",
     "DOGE": "dogecoin",
+    "DOGECOIN": "dogecoin",
     "MATIC": "matic-network",
+    "POLYGON": "matic-network",
     "AVAX": "avalanche-2",
+    "AVALANCHE": "avalanche-2",
     "LINK": "chainlink",
+    "CHAINLINK": "chainlink",
     "UNI": "uniswap",
+    "UNISWAP": "uniswap",
     "ATOM": "cosmos",
+    "COSMOS": "cosmos",
     "BNB": "binancecoin",
+    "BINANCE COIN": "binancecoin",
     "USDT": "tether",
+    "TETHER": "tether",
     "USDC": "usd-coin",
     "TRX": "tron",
+    "TRON": "tron",
     "TON": "the-open-network",
     "XLM": "stellar",
+    "STELLAR": "stellar",
     "SHIB": "shiba-inu",
     "APT": "aptos",
+    "APTOS": "aptos",
     "ARB": "arbitrum",
+    "ARBITRUM": "arbitrum",
     "OP": "optimism",
+    "OPTIMISM": "optimism",
     "INJ": "injective-protocol",
+    "INJECTIVE": "injective-protocol",
     "SUI": "sui",
     "NEAR": "near",
     "FET": "fetch-ai",
     "PEPE": "pepe",
     "WIF": "dogwifcoin",
+    "BONK": "bonk",
+    "FTM": "fantom",
+    "FANTOM": "fantom",
+    "ALGO": "algorand",
+    "ALGORAND": "algorand",
+    "VET": "vechain",
+    "VECHAIN": "vechain",
+    "ICP": "internet-computer",
+    "FIL": "filecoin",
+    "FILECOIN": "filecoin",
+    "HBAR": "hedera-hashgraph",
+    "HEDERA": "hedera-hashgraph",
+    "APE": "apecoin",
+    "APECOIN": "apecoin",
+    "SAND": "the-sandbox",
+    "SANDBOX": "the-sandbox",
+    "MANA": "decentraland",
+    "DECENTRALAND": "decentraland",
+    "AXS": "axie-infinity",
+    "THETA": "theta-token",
+    "XTZ": "tezos",
+    "TEZOS": "tezos",
+    "EOS": "eos",
+    "AAVE": "aave",
+    "MKR": "maker",
+    "MAKER": "maker",
+    "GRT": "the-graph",
+    "GRAPH": "the-graph",
+    "SNX": "synthetix-network-token",
+    "SYNTHETIX": "synthetix-network-token",
+    "CRV": "curve-dao-token",
+    "CURVE": "curve-dao-token",
+    "LDO": "lido-dao",
+    "LIDO": "lido-dao",
+    "QNT": "quant-network",
+    "QUANT": "quant-network",
+    "STX": "blockstack",
+    "STACKS": "blockstack",
+    "IMX": "immutable-x",
+    "IMMUTABLE": "immutable-x",
+    "RUNE": "thorchain",
+    "THORCHAIN": "thorchain",
+    "KAVA": "kava",
+    "ZEC": "zcash",
+    "ZCASH": "zcash",
+    "DASH": "dash",
+    "XMR": "monero",
+    "MONERO": "monero",
+    "ETC": "ethereum-classic",
 }
 
 
@@ -67,6 +137,45 @@ def _normalize_timestamp(timestamp: str | None) -> str | None:
     except ValueError:
         return timestamp
     return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+async def _search_coingecko_id(symbol: str) -> str | None:
+    """Search CoinGecko for a coin ID by symbol.
+    Returns the coin ID if found, otherwise returns the symbol in lowercase as fallback.
+    """
+    url = f"{COINGECKO_BASE}/search"
+    params = {"query": symbol}
+    
+    headers = {"Accept": "application/json"}
+    if COINGECKO_API_KEY:
+        params["x_cg_demo_api_key"] = COINGECKO_API_KEY
+    
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(url, params=params, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+        
+        # Look for exact symbol match in coins
+        coins = data.get("coins", [])
+        for coin in coins:
+            if coin.get("symbol", "").upper() == symbol.upper():
+                coin_id = coin.get("id")
+                logger.debug(f"[CoinGecko Search] Found ID '{coin_id}' for symbol '{symbol}'")
+                return coin_id
+        
+        # If no exact match, try to use the first result if it's close
+        if coins:
+            coin_id = coins[0].get("id")
+            logger.debug(f"[CoinGecko Search] Using first result '{coin_id}' for symbol '{symbol}'")
+            return coin_id
+            
+    except httpx.HTTPError as exc:
+        logger.debug(f"[CoinGecko Search] API failed for '{symbol}': {exc}")
+    
+    # Fallback to lowercase symbol
+    logger.debug(f"[CoinGecko Search] No ID found for '{symbol}', using lowercase as fallback")
+    return symbol.lower()
 
 
 @redis_cache(ttl=60)  # Cache crypto prices for 60 seconds
@@ -83,9 +192,8 @@ async def fetch_crypto_prices(symbols: Iterable[str]) -> dict[str, float]:
         if symbol in COIN_ID_MAP:
             coin_id = COIN_ID_MAP[symbol]
         else:
-            coin_id = await search_coin_id(symbol)
-            if not coin_id:
-                coin_id = symbol.lower()
+            # Try to find the coin ID dynamically
+            coin_id = await _search_coingecko_id(symbol)
         
         coin_ids.append(coin_id)
         symbol_to_id[symbol] = coin_id
@@ -97,12 +205,15 @@ async def fetch_crypto_prices(symbols: Iterable[str]) -> dict[str, float]:
     if COINGECKO_API_KEY:
         params["x_cg_demo_api_key"] = COINGECKO_API_KEY
 
+    logger.debug(f"Fetching crypto prices for {symbol_list} from CoinGecko...")
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.get(url, params=params, headers=headers)
             response.raise_for_status()
             data = response.json()
+        logger.debug(f"CoinGecko response: {data}")
     except httpx.HTTPError as exc:
+        logger.debug(f"CoinGecko API failed: {exc}")
         return {}
 
     prices: dict[str, float] = {}
@@ -112,6 +223,7 @@ async def fetch_crypto_prices(symbols: Iterable[str]) -> dict[str, float]:
         if usd_price is not None:
             prices[symbol] = float(usd_price)
     
+    logger.debug(f"Parsed prices: {prices}")
     return prices
 
 
