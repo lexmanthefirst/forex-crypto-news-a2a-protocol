@@ -306,20 +306,18 @@ class MarketAgent:
             role="agent",
             parts=[MessagePart(kind="text", text=agent_text)],
             messageId=str(uuid4()),
-            contextId=context_id,
-            taskId=task_id,
-            timestamp=datetime.now(timezone.utc)
+            taskId=None,  # Set to None in history like working agent
+            metadata=None  # Set to None in history like working agent
         )
 
-        # Step 2: Create artifacts
+        # Step 2: Create artifacts (match working agent format)
+        # Working agents use ONE artifact with kind="text" containing the response
         artifacts: list[Artifact] = [
-            Artifact(name="analysis", parts=[MessagePart(kind="data", data=analysis)]),
+            Artifact(
+                name="assistantResponse",
+                parts=[MessagePart(kind="text", text=agent_text)]
+            )
         ]
-        if price_snapshot:
-            artifacts.append(Artifact(name="price_snapshot", parts=[MessagePart(kind="data", data=price_snapshot)]))
-        if technical_data:
-            artifacts.append(Artifact(name="technical_indicators", parts=[MessagePart(kind="data", data=technical_data)]))
-        artifacts.append(Artifact(name="recent_news", parts=[MessagePart(kind="data", data={"items": relevant[:3] if relevant else []})]))
 
         # Step 3: Build conversation history (includes response_message)
         history = self._build_history(messages, response_message)
@@ -345,21 +343,23 @@ class MarketAgent:
                 text="Analysis completed successfully" if status_state == "completed" else "Analysis failed"
             )],
             messageId=str(uuid4()),
-            contextId=context_id,
-            taskId=task_id,
-            timestamp=datetime.now(timezone.utc)
+            taskId=None,  # Set to None like working agent
+            metadata=None  # Set to None like working agent
         )
 
         task_status = TaskStatus(state=status_state, message=status_message)
 
         # Step 6: Create successful task result
-        return TaskResult(
+        result = TaskResult(
             taskId=task_id,
             contextId=context_id,
             status=task_status,
             artifacts=artifacts,
             history=history,
         )
+        # Set user's messageId for result.id field (Telex compatibility)
+        result._user_message_id = user_msg.messageId
+        return result
 
     def _extract_pair(self, text: str) -> str | None:
         """Extract forex pair from text.
@@ -529,18 +529,36 @@ class MarketAgent:
         incoming_messages: list[A2AMessage],
         agent_message: A2AMessage
     ) -> list[A2AMessage]:
-        """Build conversation history with agent response.
+        """Build conversation history with user message and agent response.
 
-        Per A2A protocol and Telex expectations, the history array should contain
-        ONLY the agent's response message. Telex maintains the full conversation
-        history on their side and just needs the agent's latest response to append.
+        Per working Telex agent logs, the history array should contain:
+        1. The last user message (cleaned text only, no metadata/data parts)
+        2. The agent's response message
         
-        Reference: https://hng-stage3-task-production.up.railway.app blog example
-        shows history: [agent_response_only]
+        Reference: hng-stage3-task working agent shows history: [user_msg, agent_msg]
         """
-        # Return only the agent's response message
-        # Telex will handle appending this to their conversation history
-        return [agent_message]
+        history = []
+        
+        # Add cleaned user message (text only, no complex data parts)
+        if incoming_messages:
+            last_user_msg = incoming_messages[-1]
+            # Extract just the text from the user message
+            user_text = self._extract_text_from_message(last_user_msg)
+            
+            # Create simplified user message for history
+            clean_user_msg = A2AMessage(
+                role="user",
+                parts=[MessagePart(kind="text", text=user_text)],
+                messageId=str(uuid4()),
+                taskId=None,
+                metadata=None
+            )
+            history.append(clean_user_msg)
+        
+        # Add agent response
+        history.append(agent_message)
+        
+        return history
 
     def _extract_analysis_data(self, task: TaskResult) -> dict[str, Any]:
         for artifact in task.artifacts:
@@ -603,29 +621,17 @@ class MarketAgent:
             role="agent",
             parts=[MessagePart(kind="text", text=summary_text)],
             messageId=str(uuid4()),
-            contextId=context_id,
-            taskId=task_id,
-            timestamp=datetime.now(timezone.utc)
+            taskId=None,  # Set to None in history like working agent
+            metadata=None  # Set to None in history like working agent
         )
         
-        # Step 2: Build artifacts
+        # Step 2: Build artifacts (match working agent format)
+        # Working agents use ONE artifact with kind="text" containing the response
         artifacts = [
             Artifact(
-                name="market_summary",
-                parts=[MessagePart(kind="data", data=summary)]
-            ),
-            Artifact(
-                name="top_performers",
-                parts=[MessagePart(kind="data", data=summary.get("crypto", {}).get("best_performers_24h", []))]
-            ),
-            Artifact(
-                name="worst_performers",
-                parts=[MessagePart(kind="data", data=summary.get("crypto", {}).get("worst_performers_24h", []))]
-            ),
-            Artifact(
-                name="trending_coins",
-                parts=[MessagePart(kind="data", data=summary.get("crypto", {}).get("trending", []))]
-            ),
+                name="assistantResponse",
+                parts=[MessagePart(kind="text", text=summary_text)]
+            )
         ]
         
         # Step 3: Build conversation history
@@ -642,21 +648,24 @@ class MarketAgent:
                 text="Market summary generated successfully"
             )],
             messageId=str(uuid4()),
-            contextId=context_id,
-            taskId=task_id,
-            timestamp=datetime.now(timezone.utc)
+            taskId=None,  # Set to None like working agent
+            metadata=None  # Set to None like working agent
         )
         
         task_status = TaskStatus(state="completed", message=status_message)
         
         # Step 6: Create successful task result
-        return TaskResult(
+        result = TaskResult(
             taskId=task_id,
             contextId=context_id,
             status=task_status,
             artifacts=artifacts,
             history=history,
         )
+        # Set user's messageId for result.id field (Telex compatibility)
+        if messages:
+            result._user_message_id = messages[-1].messageId
+        return result
 
     @staticmethod
     def _format_analysis_message(

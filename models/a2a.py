@@ -95,12 +95,13 @@ class TaskResult(BaseModel):
     artifacts: List[Artifact] = []
     history: List[A2AMessage] = []
     kind: Literal["task"] = "task"
+    _user_message_id: Optional[str] = None  # Store user's messageId
     
     @computed_field
     @property
     def id(self) -> str:
-        """Alias for taskId for Telex compatibility."""
-        return self.taskId
+        """Return user's messageId if available, otherwise taskId."""
+        return self._user_message_id if self._user_message_id else self.taskId
 
 
 class JSONRPCResponse(BaseModel):
