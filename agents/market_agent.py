@@ -371,9 +371,10 @@ class MarketAgent:
         """Extract cryptocurrency symbol from text using simple map-based extraction.
         
         Priority order:
-        1. Check hardcoded COIN_ID_MAP (most reliable)
-        2. Try LLM extraction with map validation (fallback)
-        3. Hardcoded common names (last resort)
+        1. Check hardcoded COIN_ID_MAP (most reliable, FAST)
+        2. Check for full coin names in text (FAST)
+        3. Try LLM extraction with map validation (SLOW - only if needed)
+        4. Hardcoded common names (FAST fallback)
         
         Returns the CoinGecko ID (e.g., "bitcoin") for compatibility with price APIs.
         """
@@ -391,7 +392,7 @@ class MarketAgent:
             "think", "say", "tell", "ask", "use", "find", "want", "need", "try"
         }
         
-        # Priority 1: Direct match in COIN_ID_MAP (most reliable)
+        # Priority 1: Direct match in COIN_ID_MAP (most reliable, FAST)
         words = text_upper.replace(",", " ").replace(".", " ").split()
         for word in words:
             if word in skip_words or len(word) < 2:
@@ -403,36 +404,13 @@ class MarketAgent:
                 logger.info(f"[Direct Match] '{word}' -> '{coin_id}'")
                 return coin_id
         
-        # Priority 2: Check for full coin names in text
+        # Priority 2: Check for full coin names in text (FAST)
         for key, coin_id in COIN_ID_MAP.items():
             if len(key) > 3 and key in text_upper:  # Full names like "BITCOIN", "ETHEREUM"
                 logger.info(f"[Name Match] Found '{key}' -> '{coin_id}'")
                 return coin_id
         
-        # Priority 3: Try LLM extraction (if map doesn't match)
-        coin_query = extract_coin_with_llm(text)
-        if coin_query:
-            # Filter out garbage responses
-            if "TICKER" in coin_query.upper() or len(coin_query) > 20 or "-" in coin_query:
-                logger.warning(f"[LLM] Invalid extraction '{coin_query}', skipping")
-            else:
-                # Check if LLM result is in our map
-                coin_query_upper = coin_query.upper()
-                if coin_query_upper in COIN_ID_MAP:
-                    coin_id = COIN_ID_MAP[coin_query_upper]
-                    logger.info(f"[LLM+Map] '{coin_query}' -> '{coin_id}'")
-                    return coin_id
-                
-                # Try to resolve via alias (only for major coins)
-                coin_id = resolve_coin_alias(coin_query)
-                if coin_id and coin_id in COIN_ID_MAP.values():
-                    logger.info(f"[LLM+Alias] '{coin_query}' -> '{coin_id}'")
-                    return coin_id
-                
-                logger.info(f"[LLM] Extracted '{coin_query}' (no map match, using lowercase)")
-                return coin_query.lower()
-        
-        # Priority 4: Fallback hardcoded common names
+        # Priority 3: Fallback hardcoded common names (FAST)
         crypto_map = {
             "bitcoin": "bitcoin",
             "ethereum": "ethereum",
@@ -457,6 +435,25 @@ class MarketAgent:
             if name in text_lower:
                 logger.info(f"[Fallback] Matched '{name}' -> '{coin_id}'")
                 return coin_id
+        
+        # Priority 4: ONLY use LLM if nothing matched (SLOW, last resort)
+        # This is expensive and should rarely be needed with the expanded map
+        logger.debug(f"No quick match found, trying LLM extraction (slow)...")
+        coin_query = extract_coin_with_llm(text)
+        if coin_query:
+            # Filter out garbage responses
+            if "TICKER" in coin_query.upper() or len(coin_query) > 20 or "-" in coin_query:
+                logger.warning(f"[LLM] Invalid extraction '{coin_query}', skipping")
+            else:
+                # Check if LLM result is in our map
+                coin_query_upper = coin_query.upper()
+                if coin_query_upper in COIN_ID_MAP:
+                    coin_id = COIN_ID_MAP[coin_query_upper]
+                    logger.info(f"[LLM+Map] '{coin_query}' -> '{coin_id}'")
+                    return coin_id
+                
+                logger.info(f"[LLM] Extracted '{coin_query}' (no map match, using lowercase)")
+                return coin_query.lower()
         
         logger.warning(f"Could not extract valid coin symbol from: {text}")
         return None
