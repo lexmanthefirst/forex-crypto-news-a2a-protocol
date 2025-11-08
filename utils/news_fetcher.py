@@ -9,6 +9,7 @@ from typing import Any, Iterable
 import httpx
 
 from utils.caching import redis_cache
+from utils.assets import get_coin_id
 
 logger = logging.getLogger(__name__)
 
@@ -21,112 +22,6 @@ COINGECKO_API_KEY = os.getenv("COINGECKO_API_KEY", "")
 ALPHAVANTAGE_KEY = os.getenv("ALPHAVANTAGE_API_KEY", "")
 NEWSAPI_KEY = os.getenv("NEWSAPI_API_KEY", "")
 CRYPTOPANIC_KEY = os.getenv("CRYPTOPANIC_API_KEY", "")
-
-# Helper map for common coin tickers to their CoinGecko IDs
-# Extended to support more cryptocurrencies
-COIN_ID_MAP = {
-    # Major Cryptocurrencies
-    "BTC": "bitcoin",
-    "BITCOIN": "bitcoin",
-    "ETH": "ethereum",
-    "ETHEREUM": "ethereum",
-    "XRP": "ripple",
-    "RIPPLE": "ripple",
-    "LTC": "litecoin",
-    "LITECOIN": "litecoin",
-    "BCH": "bitcoin-cash",
-    "SOL": "solana",
-    "SOLANA": "solana",
-    "ADA": "cardano",
-    "CARDANO": "cardano",
-    "DOT": "polkadot",
-    "POLKADOT": "polkadot",
-    "DOGE": "dogecoin",
-    "DOGECOIN": "dogecoin",
-    "MATIC": "matic-network",
-    "POLYGON": "matic-network",
-    "AVAX": "avalanche-2",
-    "AVALANCHE": "avalanche-2",
-    "LINK": "chainlink",
-    "CHAINLINK": "chainlink",
-    "UNI": "uniswap",
-    "UNISWAP": "uniswap",
-    "ATOM": "cosmos",
-    "COSMOS": "cosmos",
-    "BNB": "binancecoin",
-    "BINANCE COIN": "binancecoin",
-    "USDT": "tether",
-    "TETHER": "tether",
-    "USDC": "usd-coin",
-    "TRX": "tron",
-    "TRON": "tron",
-    "TON": "the-open-network",
-    "XLM": "stellar",
-    "STELLAR": "stellar",
-    "SHIB": "shiba-inu",
-    "APT": "aptos",
-    "APTOS": "aptos",
-    "ARB": "arbitrum",
-    "ARBITRUM": "arbitrum",
-    "OP": "optimism",
-    "OPTIMISM": "optimism",
-    "INJ": "injective-protocol",
-    "INJECTIVE": "injective-protocol",
-    "SUI": "sui",
-    "NEAR": "near",
-    "FET": "fetch-ai",
-    "PEPE": "pepe",
-    "WIF": "dogwifcoin",
-    "BONK": "bonk",
-    "FTM": "fantom",
-    "FANTOM": "fantom",
-    "ALGO": "algorand",
-    "ALGORAND": "algorand",
-    "VET": "vechain",
-    "VECHAIN": "vechain",
-    "ICP": "internet-computer",
-    "FIL": "filecoin",
-    "FILECOIN": "filecoin",
-    "HBAR": "hedera-hashgraph",
-    "HEDERA": "hedera-hashgraph",
-    "APE": "apecoin",
-    "APECOIN": "apecoin",
-    "SAND": "the-sandbox",
-    "SANDBOX": "the-sandbox",
-    "MANA": "decentraland",
-    "DECENTRALAND": "decentraland",
-    "AXS": "axie-infinity",
-    "THETA": "theta-token",
-    "XTZ": "tezos",
-    "TEZOS": "tezos",
-    "EOS": "eos",
-    "AAVE": "aave",
-    "MKR": "maker",
-    "MAKER": "maker",
-    "GRT": "the-graph",
-    "GRAPH": "the-graph",
-    "SNX": "synthetix-network-token",
-    "SYNTHETIX": "synthetix-network-token",
-    "CRV": "curve-dao-token",
-    "CURVE": "curve-dao-token",
-    "LDO": "lido-dao",
-    "LIDO": "lido-dao",
-    "QNT": "quant-network",
-    "QUANT": "quant-network",
-    "STX": "blockstack",
-    "STACKS": "blockstack",
-    "IMX": "immutable-x",
-    "IMMUTABLE": "immutable-x",
-    "RUNE": "thorchain",
-    "THORCHAIN": "thorchain",
-    "KAVA": "kava",
-    "ZEC": "zcash",
-    "ZCASH": "zcash",
-    "DASH": "dash",
-    "XMR": "monero",
-    "MONERO": "monero",
-    "ETC": "ethereum-classic",
-}
 
 
 def _normalize_timestamp(timestamp: str | None) -> str | None:
@@ -189,12 +84,12 @@ async def fetch_crypto_prices(symbols: Iterable[str]) -> dict[str, float]:
     symbol_to_id = {}
     
     for symbol in symbol_list:
-        if symbol in COIN_ID_MAP:
-            coin_id = COIN_ID_MAP[symbol]
-        else:
-            # Try to find the coin ID dynamically
+        # Prefer local alias resolution first (very fast, in-memory)
+        coin_id = get_coin_id(symbol)
+        if not coin_id:
+            # Fall back to CoinGecko search for unknown tokens (slower)
             coin_id = await _search_coingecko_id(symbol)
-        
+
         coin_ids.append(coin_id)
         symbol_to_id[symbol] = coin_id
     

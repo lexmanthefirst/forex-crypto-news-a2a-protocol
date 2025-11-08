@@ -10,40 +10,7 @@ from typing import Any
 import httpx
 
 from utils.coingecko_helpers import search_coin_id
-
-# coin ID map for common cryptocurrencies
-COIN_ID_MAP = {
-    "BTC": "bitcoin",
-    "ETH": "ethereum",
-    "XRP": "ripple",
-    "LTC": "litecoin",
-    "BCH": "bitcoin-cash",
-    "SOL": "solana",
-    "ADA": "cardano",
-    "DOT": "polkadot",
-    "DOGE": "dogecoin",
-    "MATIC": "matic-network",
-    "AVAX": "avalanche-2",
-    "LINK": "chainlink",
-    "UNI": "uniswap",
-    "ATOM": "cosmos",
-    "BNB": "binancecoin",
-    "USDT": "tether",
-    "USDC": "usd-coin",
-    "TRX": "tron",
-    "TON": "the-open-network",
-    "XLM": "stellar",
-    "SHIB": "shiba-inu",
-    "APT": "aptos",
-    "ARB": "arbitrum",
-    "OP": "optimism",
-    "INJ": "injective-protocol",
-    "SUI": "sui",
-    "NEAR": "near",
-    "FET": "fetch-ai",
-    "PEPE": "pepe",
-    "WIF": "dogwifcoin",
-}
+from utils.assets import get_coin_id
 
 COINGECKO_BASE = os.getenv("COINGECKO_BASE", "https://api.coingecko.com/api/v3")
 COINGECKO_API_KEY = os.getenv("COINGECKO_API_KEY", "")
@@ -57,9 +24,10 @@ async def fetch_price_history(symbol: str, days: int = 7) -> list[float]:
     """
     symbol_upper = symbol.upper()
     
-    if symbol_upper in COIN_ID_MAP:
-        coin_id = COIN_ID_MAP[symbol_upper]
-    else:
+    # Prefer the local alias map first (fast, in-memory). Fall back to
+    # CoinGecko search when unknown.
+    coin_id = get_coin_id(symbol_upper)
+    if not coin_id:
         coin_id = await search_coin_id(symbol_upper)
         if not coin_id:
             coin_id = symbol.lower()

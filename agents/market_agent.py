@@ -12,13 +12,14 @@ from models.a2a import A2AMessage, Artifact, MessagePart, TaskResult, TaskStatus
 from utils.coin_aliases import resolve_coin_alias
 from utils.gemini_client import analyze_sync
 from utils.market_summary import get_comprehensive_market_summary, format_market_summary_text
-from utils.news_fetcher import fetch_combined_news, fetch_crypto_prices, fetch_forex_rate, COIN_ID_MAP
+from utils.news_fetcher import fetch_combined_news, fetch_crypto_prices, fetch_forex_rate
 from utils.notifier import send_console_notification, send_webhook_notification
 from utils.prompt_extraction import extract_coin_with_llm
 from utils.redis_client import redis_store
 from utils.session_store import session_store
 from utils.technical_analysis import get_technical_summary
 from utils.telex_parser import extract_text_from_telex_message
+from utils.assets import get_coin_id, CRYPTO_LOWER_MAP, get_coin_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +137,17 @@ class MarketAgent:
             return await self._handle_market_summary(messages, context_id, task_id)
 
         pair = self._extract_pair(text)
-        symbol = self._extract_symbol(text)
+        symbol = self._extract_symbol(text)  # coingecko id, e.g. 'bitcoin'
+
+        # Derive a display ticker (e.g., 'BTC') from local metadata for nicer output
+        display_ticker: str | None = None
+        if symbol:
+            try:
+                meta_list = get_coin_metadata()
+                id_to_symbol = {m["id"]: m["symbol"].upper() for m in meta_list}
+                display_ticker = id_to_symbol.get(symbol, symbol.upper())
+            except Exception:
+                display_ticker = symbol.upper()
 
         # Parallel fetch all data to reduce latency
         fetch_tasks = []
@@ -145,7 +156,9 @@ class MarketAgent:
             fetch_tasks.append(("forex", fetch_forex_rate(pair)))
         
         if symbol:
-            fetch_tasks.append(("crypto_price", fetch_crypto_prices([symbol])))
+            # Fetch prices by ticker for human-friendly keys (BTC -> price)
+            ticker_to_fetch = display_ticker or symbol.upper()
+            fetch_tasks.append(("crypto_price", fetch_crypto_prices([ticker_to_fetch])))
             fetch_tasks.append(("technical", get_technical_summary(symbol)))
         
         # Always fetch news in parallel
@@ -178,8 +191,9 @@ class MarketAgent:
             if "crypto_price" in results:
                 result = results["crypto_price"]
                 if isinstance(result, Exception):
-                    price_snapshot["crypto"] = {symbol: None}
-                    error_messages.append(f"Unable to fetch price data for {symbol}.")
+                    ticker_to_fetch = display_ticker or symbol.upper()
+                    price_snapshot["crypto"] = {ticker_to_fetch: None}
+                    error_messages.append(f"Unable to fetch price data for {ticker_to_fetch}.")
                 else:
                     price_snapshot["crypto"] = result
                     
@@ -191,7 +205,9 @@ class MarketAgent:
         combined_news = results.get("news", [])
         if isinstance(combined_news, Exception):
             combined_news = []
-        relevant = self._filter_relevant_news(combined_news, pair, symbol)
+
+        ticker_for_news = (display_ticker or symbol.upper()) if symbol else None
+        relevant = self._filter_relevant_news(combined_news, pair, ticker_for_news)
         news_summary = (
             "\n".join(f"• {item.get('title')} ({item.get('source')})" for item in relevant[:5])
             or "No recent headlines found."
@@ -277,7 +293,7 @@ class MarketAgent:
             technical_data=technical_data,
             news=relevant[:3],
             pair=pair,
-            symbol=symbol,
+            symbol=display_ticker,
             error_messages=error_messages
         )
         
@@ -310,12 +326,14 @@ class MarketAgent:
         except Exception as e:
             logger.warning(f"Failed to store agent message: {e}")
 
+        history_messages = self._build_history(messages, agent_msg)
+
         return TaskResult(
             taskId=task_id,
             contextId=context_id,
             status=task_status,
             artifacts=artifacts,
-            history=messages + [agent_msg],
+            history=history_messages,
         )
 
     def _extract_pair(self, text: str) -> str | None:
@@ -368,14 +386,14 @@ class MarketAgent:
         return None
 
     def _extract_symbol(self, text: str) -> str | None:
-        """Extract cryptocurrency symbol from text using simple map-based extraction.
-        
+        """Extract cryptocurrency symbol using hierarchical matching strategies.
+
         Priority order:
-        1. Check hardcoded COIN_ID_MAP (most reliable, FAST)
-        2. Check for full coin names in text (FAST)
-        3. Try LLM extraction with map validation (SLOW - only if needed)
-        4. Hardcoded common names (FAST fallback)
-        
+        1. Check centralized alias map (fast, deterministic)
+        2. Match common full coin names in the text
+        3. Use a curated fallback dictionary of popular assets
+        4. Ask the LLM extractor as a last resort
+
         Returns the CoinGecko ID (e.g., "bitcoin") for compatibility with price APIs.
         """
         text_upper = text.upper()
@@ -392,21 +410,21 @@ class MarketAgent:
             "think", "say", "tell", "ask", "use", "find", "want", "need", "try"
         }
         
-        # Priority 1: Direct match in COIN_ID_MAP (most reliable, FAST)
+        # Priority 1: Direct match using centralized alias table (very fast)
         words = text_upper.replace(",", " ").replace(".", " ").split()
         for word in words:
             if word in skip_words or len(word) < 2:
                 continue
-            
-            # Check exact match in COIN_ID_MAP
-            if word in COIN_ID_MAP:
-                coin_id = COIN_ID_MAP[word]
+
+            # Use assets.get_coin_id to resolve common aliases/symbols/names
+            coin_id = get_coin_id(word)
+            if coin_id:
                 logger.info(f"[Direct Match] '{word}' -> '{coin_id}'")
                 return coin_id
         
         # Priority 2: Check for full coin names in text (FAST)
-        for key, coin_id in COIN_ID_MAP.items():
-            if len(key) > 3 and key in text_upper:  # Full names like "BITCOIN", "ETHEREUM"
+        for key, coin_id in CRYPTO_LOWER_MAP.items():
+            if len(key) > 3 and key in text_lower:  # Full names like "bitcoin", "ethereum"
                 logger.info(f"[Name Match] Found '{key}' -> '{coin_id}'")
                 return coin_id
         
@@ -445,13 +463,12 @@ class MarketAgent:
             if "TICKER" in coin_query.upper() or len(coin_query) > 20 or "-" in coin_query:
                 logger.warning(f"[LLM] Invalid extraction '{coin_query}', skipping")
             else:
-                # Check if LLM result is in our map
-                coin_query_upper = coin_query.upper()
-                if coin_query_upper in COIN_ID_MAP:
-                    coin_id = COIN_ID_MAP[coin_query_upper]
+                # Prefer the fast local alias resolver for the LLM result
+                coin_id = get_coin_id(coin_query)
+                if coin_id:
                     logger.info(f"[LLM+Map] '{coin_query}' -> '{coin_id}'")
                     return coin_id
-                
+
                 logger.info(f"[LLM] Extracted '{coin_query}' (no map match, using lowercase)")
                 return coin_query.lower()
         
@@ -462,13 +479,17 @@ class MarketAgent:
         self,
         news: list[dict[str, Any]],
         pair: str | None,
-        symbol: str | None,
+        ticker: str | None,
     ) -> list[dict[str, Any]]:
         if not news:
             return []
-        if symbol:
-            ticker = symbol.upper()
-            return [n for n in news if ticker in (n.get("symbols") or []) or ticker in (n.get("title") or "").upper()]
+        if ticker:
+            upper_ticker = ticker.upper()
+            return [
+                n
+                for n in news
+                if upper_ticker in (n.get("symbols") or []) or upper_ticker in (n.get("title") or "").upper()
+            ]
         if pair:
             base = pair.split("/")[0].upper()
             return [
@@ -477,6 +498,25 @@ class MarketAgent:
                 if base in (n.get("title") or "").upper() or base in (n.get("source") or "").upper()
             ]
         return news
+
+    def _build_history(
+        self,
+        incoming_messages: list[A2AMessage],
+        agent_message: A2AMessage
+    ) -> list[A2AMessage]:
+        """Build conversation history ensuring the formatted response is included.
+
+        Mirrors the MoodMatch agent behavior so Telex clients can render the
+        final response from the `history` array without re-computing artifacts.
+        """
+        history: list[A2AMessage] = []
+
+        for message in incoming_messages:
+            if message.role in {"user", "agent"}:
+                history.append(message)
+
+        history.append(agent_message)
+        return history
 
     def _extract_analysis_data(self, task: TaskResult) -> dict[str, Any]:
         for artifact in task.artifacts:
