@@ -38,6 +38,9 @@ class MarketAgent:
         self.enable_notifications = enable_notifications
         self.notification_cooldown = int(os.getenv("NOTIFICATION_COOLDOWN_SECONDS", "900"))
         self.last_notified: dict[str, float] = {}
+        
+        # Context storage (in-memory for fast lookup, like MoodMatch)
+        self.contexts: dict[str, list[A2AMessage]] = {}
 
     @staticmethod
     def _strip_html(text: str) -> str:
@@ -298,17 +301,17 @@ class MarketAgent:
             error_messages=error_messages
         )
         
-        agent_msg = A2AMessage(
-            role="agent", 
-            parts=[
-                MessagePart(kind="text", text=agent_text),
-            ],
+        # Step 1: Build response message (for conversation history display)
+        response_message = A2AMessage(
+            role="agent",
+            parts=[MessagePart(kind="text", text=agent_text)],
             messageId=str(uuid4()),
             contextId=context_id,
             taskId=task_id,
             timestamp=datetime.now(timezone.utc)
         )
 
+        # Step 2: Create artifacts
         artifacts: list[Artifact] = [
             Artifact(name="analysis", parts=[MessagePart(kind="data", data=analysis)]),
         ]
@@ -318,26 +321,44 @@ class MarketAgent:
             artifacts.append(Artifact(name="technical_indicators", parts=[MessagePart(kind="data", data=technical_data)]))
         artifacts.append(Artifact(name="recent_news", parts=[MessagePart(kind="data", data={"items": relevant[:3] if relevant else []})]))
 
-
-        status_state = "completed"
-        if (pair and price_snapshot.get("pair", {}).get("rate") is None) and (not symbol):
-            status_state = "failed"
-
-        task_status = TaskStatus(state=status_state, message=agent_msg)
+        # Step 3: Build conversation history (includes response_message)
+        history = self._build_history(messages, response_message)
         
+        # Step 4: Store context (like MoodMatch)
+        self.contexts[context_id] = history
+        
+        # Also persist to Redis for durability
         try:
-            await session_store.append_message(context_id, agent_msg)
+            await session_store.append_message(context_id, response_message)
         except Exception as e:
             logger.warning(f"Failed to store agent message: {e}")
 
-        history_messages = self._build_history(messages, agent_msg)
+        # Step 5: Create status message (A2A protocol compliance)
+        status_state = "completed"
+        if (pair and price_snapshot.get("pair", {}).get("rate") is None) and (not symbol):
+            status_state = "failed"
+        
+        status_message = A2AMessage(
+            role="agent",
+            parts=[MessagePart(
+                kind="text",
+                text="Analysis completed successfully" if status_state == "completed" else "Analysis failed"
+            )],
+            messageId=str(uuid4()),
+            contextId=context_id,
+            taskId=task_id,
+            timestamp=datetime.now(timezone.utc)
+        )
 
+        task_status = TaskStatus(state=status_state, message=status_message)
+
+        # Step 6: Create successful task result
         return TaskResult(
             taskId=task_id,
             contextId=context_id,
             status=task_status,
             artifacts=artifacts,
-            history=history_messages,
+            history=history,
         )
 
     def _extract_pair(self, text: str) -> str | None:
@@ -578,19 +599,17 @@ class MarketAgent:
         
         summary_text = format_market_summary_text(summary)
         
-        agent_msg = A2AMessage(
+        # Step 1: Build response message (for conversation history display)
+        response_message = A2AMessage(
             role="agent",
-            parts=[
-                MessagePart(kind="text", text=summary_text),
-                MessagePart(kind="data", data=summary),
-            ],
+            parts=[MessagePart(kind="text", text=summary_text)],
             messageId=str(uuid4()),
             contextId=context_id,
             taskId=task_id,
             timestamp=datetime.now(timezone.utc)
         )
         
-        # Build artifacts
+        # Step 2: Build artifacts
         artifacts = [
             Artifact(
                 name="market_summary",
@@ -610,14 +629,34 @@ class MarketAgent:
             ),
         ]
         
-        task_status = TaskStatus(state="completed", message=agent_msg)
+        # Step 3: Build conversation history
+        history = self._build_history(messages, response_message)
         
+        # Step 4: Store context (like MoodMatch)
+        self.contexts[context_id] = history
+        
+        # Step 5: Create status message (A2A protocol compliance)
+        status_message = A2AMessage(
+            role="agent",
+            parts=[MessagePart(
+                kind="text",
+                text="Market summary generated successfully"
+            )],
+            messageId=str(uuid4()),
+            contextId=context_id,
+            taskId=task_id,
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        task_status = TaskStatus(state="completed", message=status_message)
+        
+        # Step 6: Create successful task result
         return TaskResult(
             taskId=task_id,
             contextId=context_id,
             status=task_status,
             artifacts=artifacts,
-            history=messages + [agent_msg],
+            history=history,
         )
 
     @staticmethod
