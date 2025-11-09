@@ -253,21 +253,21 @@ def _determine_market_sentiment(average_change: float) -> str:
 
 def format_market_summary_text(summary: dict[str, Any]) -> str:
     """
-    Format market summary into comprehensive structured text with emojis and clear sections.
+    Format market summary into comprehensive structured text with clear sections.
     """
     crypto = summary.get("crypto", {})
     forex = summary.get("forex", {})
     
     # Header
     timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
-    text = f"# 📊 Market Summary - {timestamp}\n\n"
+    text = f"# Market Summary - {timestamp}\n\n"
     
     # === 1. Market Overview ===
     sentiment = summary.get("market_sentiment", "neutral").replace("_", " ").title()
     avg_change = crypto.get("average_change_24h", 0)
     total_cap = crypto.get("total_market_cap_usd", 0)
     
-    text += "## 📈 Market Overview\n\n"
+    text += "## Market Overview\n\n"
     text += f"**Overall Sentiment:** {sentiment}\n"
     text += f"**Average 24h Change:** {avg_change:+.2f}%\n"
     if total_cap > 0:
@@ -277,7 +277,7 @@ def format_market_summary_text(summary: dict[str, Any]) -> str:
     # === 2. Top Performers (24h) ===
     best_performers = crypto.get("best_performers_24h", [])[:5]
     if best_performers:
-        text += "## 🚀 Top Performers (24h)\n\n"
+        text += "## Top Performers (24h)\n\n"
         for i, coin in enumerate(best_performers, 1):
             symbol = coin.get("symbol", "").upper()
             name = coin.get("name", "")
@@ -290,7 +290,7 @@ def format_market_summary_text(summary: dict[str, Any]) -> str:
     # === 3. Worst Performers (24h) ===
     worst_performers = crypto.get("worst_performers_24h", [])[:5]
     if worst_performers:
-        text += "## 📉 Worst Performers (24h)\n\n"
+        text += "## Worst Performers (24h)\n\n"
         for i, coin in enumerate(worst_performers, 1):
             symbol = coin.get("symbol", "").upper()
             name = coin.get("name", "")
@@ -303,7 +303,7 @@ def format_market_summary_text(summary: dict[str, Any]) -> str:
     # === 4. Trending Coins ===
     trending = crypto.get("trending", [])[:5]
     if trending:
-        text += "## 🔥 Trending Coins\n\n"
+        text += "## Trending Coins\n\n"
         for i, coin in enumerate(trending, 1):
             symbol = coin.get("symbol", "").upper()
             name = coin.get("name", "")
@@ -314,7 +314,7 @@ def format_market_summary_text(summary: dict[str, Any]) -> str:
     # === 5. Recently Added ===
     recently_added = crypto.get("recently_added", [])[:5]
     if recently_added:
-        text += "## 💎 Recently Added\n\n"
+        text += "## Recently Added\n\n"
         for i, coin in enumerate(recently_added, 1):
             symbol = coin.get("symbol", "").upper()
             name = coin.get("name", "")
@@ -323,7 +323,7 @@ def format_market_summary_text(summary: dict[str, Any]) -> str:
     # === 6. Forex Majors (if available) ===
     forex_pairs = forex.get("major_pairs", [])
     if forex_pairs:
-        text += "## 💱 Major Forex Pairs\n\n"
+        text += "## Major Forex Pairs\n\n"
         for pair_data in forex_pairs[:5]:
             pair = pair_data.get("pair", "")
             rate = pair_data.get("rate", 0)

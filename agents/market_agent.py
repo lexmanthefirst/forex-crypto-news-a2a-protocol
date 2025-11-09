@@ -610,12 +610,11 @@ class MarketAgent:
             role="agent",
             parts=[MessagePart(kind="text", text=summary_text)],
             messageId=str(uuid4()),
-            taskId=None,  # Set to None in history like working agent
-            metadata=None  # Set to None in history like working agent
+            taskId=None,  
+            metadata=None  
         )
         
-        # Step 2: Build artifacts (match working agent format)
-        # Working agents use ONE artifact with kind="text" containing the response
+        # Step 2: Build artifacts
         artifacts = [
             Artifact(
                 name="assistantResponse",
@@ -630,13 +629,12 @@ class MarketAgent:
         self.contexts[context_id] = history
         
         # Step 5: Create status message (A2A protocol compliance)
-        # The status message should contain the SAME text as the artifact
         status_message = A2AMessage(
             role="agent",
-            parts=[MessagePart(kind="text", text=summary_text)],  # Same text as artifact
+            parts=[MessagePart(kind="text", text=summary_text)],
             messageId=str(uuid4()),
-            taskId=None,  # Set to None like working agent
-            metadata=None  # Set to None like working agent
+            taskId=None,  
+            metadata=None  
         )
         
         task_status = TaskStatus(state="completed", message=status_message)
@@ -676,19 +674,19 @@ class MarketAgent:
         
         # Display errors prominently if present
         if error_messages:
-            sections.append("⚠️ **Notices:**")
+            sections.append("**Notices:**")
             for error in error_messages:
                 sections.append(f"- {error}")
             sections.append("")
         
         # === MARKET OUTLOOK ===
-        sections.append("**📊 Market Outlook**")
+        sections.append("**Market Outlook**")
         sections.append(f"- **Direction:** {direction.capitalize()}")
         sections.append(f"- **Confidence Level:** {confidence:.0%}")
         sections.append("")
         
         # === PRICE DATA ===
-        sections.append("**💰 Price Information**")
+        sections.append("**Price Information**")
         if symbol and price_snapshot.get("crypto"):
             crypto_price = price_snapshot["crypto"].get(symbol)
             if crypto_price:
@@ -708,7 +706,7 @@ class MarketAgent:
         
         # === TECHNICAL ANALYSIS ===
         if technical_data:
-            sections.append("**📈 Technical Analysis (7-Day)**")
+            sections.append("**Technical Analysis (7-Day)**")
             change_pct = technical_data.get("change_pct", 0)
             trend = technical_data.get("trend", "unknown")
             signal = technical_data.get("signal", "neutral")
@@ -731,13 +729,13 @@ class MarketAgent:
         # === AI ANALYSIS ===
         reasons_list = reasons if isinstance(reasons, list) else [str(reasons)]
         if reasons_list and reasons_list[0] and reasons_list[0] != "rule-based fallback":
-            sections.append("**🤖 AI Insights**")
+            sections.append("**AI Insights**")
             for reason in reasons_list[:5]:  # Show up to 5 key factors
                 sections.append(f"- {reason}")
             sections.append("")
         
         # === NEWS HEADLINES ===
-        sections.append("**📰 Recent News**")
+        sections.append("**Recent News**")
         if news and len(news) > 0:
             for item in news[:3]:  # Top 3 headlines
                 title = item.get("title", "")
@@ -750,7 +748,7 @@ class MarketAgent:
         
         # === OVERVIEW STATEMENT ===
         if not error_messages:
-            sections.append("**📝 Overview**")
+            sections.append("**Overview**")
             
             # Build a concise 3-4 sentence overview based on the analysis
             overview_parts = []
@@ -794,7 +792,7 @@ class MarketAgent:
         
         # === FOOTER ===
         if error_messages:
-            sections.append("💡 **Tip:** Try common symbols like BTC, ETH, SOL or forex pairs like EUR/USD, GBP/USD")
+            sections.append("**Tip:** Try common symbols like BTC, ETH, SOL or forex pairs like EUR/USD, GBP/USD")
         else:
             sections.append("---")
             sections.append("*This analysis is for informational purposes only and does not constitute financial advice.*")
